@@ -1,0 +1,19 @@
+# Node/Expo
+node_modules/
+.expo/
+.expo-shared/
+dist/
+build/
+*.log
+
+# Mac + editor
+.DS_Store
+.vscode/
+.idea/
+
+# Env files (keep secrets out of git)
+.env
+.env.*
+supabase/.env
+services/scraper/.env*
+apps/mobile/.env*
