@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "lv-floorball-fantasy",
+    "slug": "lv-floorball-fantasy",
+    "plugins": ["expo-router"],
+    "scheme": "lvfloorball",
+    "android": {
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
