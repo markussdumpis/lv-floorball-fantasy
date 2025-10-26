@@ -9,7 +9,7 @@ Focus points:
 * Clear role distinction (F, D, G, Flex)
 * Intuitive navigation between Home, Team Builder, and Player List
 * Fast readability of player stats and fantasy points
-* NativeWind-based responsive design for Expo + React Native
+* React Native StyleSheet-based design for Expo + React Native (MVP)
 
 ---
 
@@ -35,10 +35,16 @@ Focus points:
 * **Body:** Inter Regular
 * **Numeric Data (e.g., points):** Inter Bold
 
-Tailwind-style example:
+React Native StyleSheet example:
 
 ```ts
-className="text-white font-semibold text-lg"
+const styles = StyleSheet.create({
+  title: {
+    color: '#F8FAFC',
+    fontWeight: '600',
+    fontSize: 18,
+  },
+});
 ```
 
 ---
@@ -49,20 +55,19 @@ The app uses **Expo Router** with the following structure:
 
 ```
 /app
-  ├── (tabs)/
-  │   ├── home.tsx
-  │   ├── players.tsx
-  │   ├── team.tsx
-  │   ├── profile.tsx
   ├── _layout.tsx  ← Bottom tab navigator
-  ├── onboarding/  ← Future expansion
+  ├── index.tsx    ← Home
+  ├── players.tsx  ← Players list & filters
+  ├── squad.tsx    ← Team builder
+  ├── profile.tsx  ← Profile/Auth
+  └── onboarding/  ← Future expansion
 ```
 
 **Tabs:**
 
 * 🏠 `Home` — Overview, upcoming matches, top scorers, your total points
 * 🧑‍🤝‍🧑 `Players` — Player list (filter + sort)
-* ⚙️ `Team` — Fantasy team builder (validation + budget)
+* ⚙️ `Squad` — Fantasy team builder (validation + budget)
 * 👤 `Profile` — User info, team name, and logout
 
 ---
@@ -115,13 +120,13 @@ The app uses **Expo Router** with the following structure:
 
 ## 🧩 Reusable Components Library
 
-| Component   | Description                             | Tailwind Style Example                                |
+| Component   | Description                             | StyleSheet Example                                |
 | ----------- | --------------------------------------- | ----------------------------------------------------- |
-| `Button`    | Primary + secondary variants            | `bg-accent text-white rounded-2xl px-4 py-2`          |
-| `Card`      | Used for players, matches, or summaries | `bg-card rounded-xl p-3 shadow-md`                    |
-| `BudgetBar` | Displays remaining credits              | `bg-gray-700 rounded-full h-2`                        |
-| `Badge`     | For roles (F, D, G, Flex)               | `bg-accent text-xs px-2 py-1 rounded-full`            |
-| `Input`     | Search/filter fields                    | `bg-card border border-gray-600 rounded-xl px-3 py-2` |
+| `Button`    | Primary + secondary variants            | `backgroundColor: '#FF6B00', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 8`          |
+| `Card`      | Used for players, matches, or summaries | `backgroundColor: '#2D3748', borderRadius: 12, padding: 12, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3`                    |
+| `BudgetBar` | Displays remaining credits              | `backgroundColor: '#4A5568', borderRadius: 8, height: 8`                        |
+| `Badge`     | For roles (F, D, G, Flex)               | `backgroundColor: '#FF6B00', fontSize: 12, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12`            |
+| `Input`     | Search/filter fields                    | `backgroundColor: '#2D3748', borderColor: '#4A5568', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8` |
 
 ---
 
@@ -129,21 +134,48 @@ The app uses **Expo Router** with the following structure:
 
 * Always show **budget counter + formation validity** live
 * Use **toast/snackbar** for feedback (added, removed, invalid)
-* Apply subtle **motion transitions** (`framer-motion/native`) for smoothness
+* Apply subtle **motion transitions** (React Native Animated API) for smoothness
 * Keep tap targets >= 44px
 
 ---
 
-## 🧩 NativeWind Class Reference Snippets
+## 🧩 React Native StyleSheet Reference Snippets
 
 Examples for Cursor to follow when generating UI components:
 
 ```tsx
-<View className="flex-1 bg-primary px-4 py-2">
-  <Text className="text-xl font-bold text-white mb-2">My Team</Text>
-  <View className="flex-row justify-between items-center">
-    <Text className="text-gray-300">Remaining budget:</Text>
-    <Text className="text-accent font-semibold">35.5 credits</Text>
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#1E293B',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#F8FAFC',
+    marginBottom: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  label: {
+    color: '#CBD5E1',
+  },
+  value: {
+    color: '#FF6B00',
+    fontWeight: '600',
+  },
+});
+
+<View style={styles.container}>
+  <Text style={styles.title}>My Team</Text>
+  <View style={styles.row}>
+    <Text style={styles.label}>Remaining budget:</Text>
+    <Text style={styles.value}>35.5 credits</Text>
   </View>
 </View>
 ```
@@ -164,9 +196,10 @@ Examples for Cursor to follow when generating UI components:
 ## ✅ Next Steps for Cursor
 
 1. Implement `PlayerListScreen` using Supabase data (players table)
-2. Apply UI patterns defined above
+2. Apply UI patterns defined above using React Native StyleSheet
 3. Add sorting and filtering by position and price
 4. Reuse shared components (`Card`, `Button`, `Badge`)
+5. **Styling approach:** Use React Native StyleSheet for MVP, avoid NativeWind dependencies
 
 ---
 

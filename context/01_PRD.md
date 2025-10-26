@@ -32,12 +32,17 @@
   * 5 Forwards (F)
   * 3 Defenders (D)
   * 1 Goalie (G)
-  * 1 Flex (F/D)
-* One captain per gameweek → **captain’s points ×2**.
+  * 1 Flex (accepts players with position F or D, not a player position itself)
+* One captain per gameweek → **captain's points ×2**.
+* **Gameweek definition:** Calendar-based weeks (Monday to Sunday), starting from season start date.
 
 ### Transfers
 
-* Start with **3 transfers**, gain **+1 per month**, max **6** in bank.
+* **MVP Implementation:** Static 3 transfers per gameweek (no accrual system for MVP)
+* **Post-MVP:** Start with 3 transfers, gain +1 per calendar month, max 6 in bank
+* **Reset cadence:** Transfers reset to base amount at start of each new season
+* **Usage tracking:** Track transfers used per gameweek, prevent exceeding limit
+* **Carryover:** Unused transfers do not carry over to next gameweek in MVP
 
 ### Budget
 
@@ -45,22 +50,65 @@
 
 ### Scoring System
 
+**Event Types (match_events.event_type enumeration):**
+- `goal` - Player scores a goal
+- `assist` - Player assists a goal
+- `hat_trick` - Player scores 3+ goals in one match
+- `penalty_shot_scored` - Player scores on penalty shot
+- `penalty_shot_missed` - Player misses penalty shot
+- `minor_2` - Player receives 2-minute penalty
+- `double_minor` - Player receives 4-minute penalty
+- `red_card` - Player receives red card
+- `mvp` - Player receives MVP award (optional)
+- `save` - Goalkeeper makes a save
+- `goal_allowed` - Goalkeeper allows a goal
+
+**Points per Role:**
 **Forwards:** Goal +1.5, Assist +1.0
 **Defenders:** Goal +2.0, Assist +1.5
 **All skaters:** Hat-trick +3, Penalty shot scored +0.5, missed –0.5, Minor 2 –0.5, Double minor –2, Red card –6, MVP +2 *(if available)*
 **Goalies:** +0.1 per save, +2 win (if reliable); GA bands → 0 = +8, 1–2 = +5, 3–5 = +2, 6–9 = –2, ≥10 = –5
+
+**Goalie Points Calculation:**
+- **Saves:** +0.1 per save (from `match_events` where `event_type = 'save'`)
+- **Win bonus:** +2 if team wins (from `matches.home_score` vs `matches.away_score`)
+- **GA bands:** Based on `goals_against` field in `match_events` where `event_type = 'goal_allowed'`
+  - 0 goals against = +8 points
+  - 1-2 goals against = +5 points  
+  - 3-5 goals against = +2 points
+  - 6-9 goals against = -2 points
+  - 10+ goals against = -5 points
+
+**Win Determination:** Match result based on `matches.home_score` vs `matches.away_score` (home_score > away_score = home team win)
+
+**Captain Multiplier:** Applied after all other calculations, captain's total points ×2
+
+**Stacking Rules:** Bonuses and penalties are additive (e.g., goal + hat-trick = 1.5 + 3 = 4.5 points)
+
 **Removed:** Game-winning goal, coach points.
 
 ---
 
 ## 4. Pricing Model
 
-1. Compute **FPPG (Fantasy Points Per Game)** from parsed stats.
-2. Apply role boosts: D ×1.15, G ×1.10.
-3. Calculate percentile pricing by position.
-4. Gamma curve for top-player premium (γ = 1.9).
-5. Price ranges: Forwards 4–13, Defenders 3–14, Goalies 5–12.
-6. Median team (5F, 3D, 1G, 1 Flex) ≈ 95 credits.
+**Formula:**
+1. Compute **FPPG (Fantasy Points Per Game)** from parsed stats (last 10 games or season average).
+2. Apply role boosts: D ×1.15, G ×1.10 (before percentile calculation).
+3. Calculate percentile pricing by position using 90th percentile method:
+   - Sort all players by boosted FPPG within position
+   - Price = base_price + (percentile_rank / 100) × (max_price - base_price)
+4. Apply gamma curve for top-player premium: final_price = base_price × (1 + (percentile/100)^γ) where γ = 1.9
+5. Price ranges: Forwards 4–13, Defenders 3–14, Goalies 5–12
+6. Median team (5F, 3D, 1G, 1 Flex) ≈ 95 credits
+
+**Example Calculation:**
+- Player: Forward with 2.5 FPPG, 85th percentile
+- Base price: 4, Max price: 13
+- Percentile price: 4 + (0.85 × 9) = 11.65
+- Gamma adjustment: 11.65 × (1 + 0.85^1.9) = 11.65 × 1.72 = 20.04
+- Final price: 13 (capped at max)
+
+**Implementation:** Run in Supabase function during CSV import, store in `players.price` column.
 
 ---
 
@@ -71,6 +119,45 @@
 3. Export as CSV: `players.csv`, `matches.csv`, `match_events.csv`.
 4. Import into Supabase.
 5. Create DB views for `player_match_points` and `fantasy_team_match_points`.
+
+### CSV Schemas
+
+**players.csv:**
+- `external_id` (string, unique, stable across seasons)
+- `name` (string, normalized by GPT)
+- `position` (enum: F, D, G)
+- `team` (string, team code)
+- `season` (string, e.g., "2024-25")
+- `goals` (integer)
+- `assists` (integer)
+- `saves` (integer, goalies only)
+- `goals_against` (integer, goalies only)
+- `games_played` (integer)
+
+**matches.csv:**
+- `external_id` (string, unique)
+- `home_team` (string, team code)
+- `away_team` (string, team code)
+- `home_score` (integer)
+- `away_score` (integer)
+- `start_time` (timestamp)
+- `season` (string)
+
+**match_events.csv:**
+- `external_id` (string, unique)
+- `match_id` (string, references matches.external_id)
+- `player_id` (string, references players.external_id)
+- `event_type` (enum: goal, assist, hat_trick, penalty_shot_scored, penalty_shot_missed, minor_2, double_minor, red_card, mvp, save, goal_allowed)
+- `minute` (integer)
+- `timestamp` (timestamp)
+
+### Reconciliation Rules
+
+- **Name normalization:** GPT removes accents, standardizes spelling, handles nicknames
+- **ID mapping:** Create `external_id` → `internal_id` mapping table for stable references
+- **Team codes:** Standardize team names to 3-letter codes (e.g., "RIG" for Riga)
+- **Season boundaries:** Use calendar year (2024-25 season = 2024-09-01 to 2025-08-31)
+- **Duplicate handling:** `external_id` must be unique, update existing records on re-import
 
 ---
 
@@ -89,7 +176,10 @@
 * Expo + React Native + TypeScript.
 * Supabase: Postgres DB, Auth, Realtime, RLS.
 * Environment variables stored in `/apps/mobile/.env`.
-* Public read for `players` table; secure writes for user data only.
+* Public read for `players` table (limited columns only); secure writes for user data only.
+* **Players table RLS:** Only expose `id`, `name`, `position`, `team`, `price`, `fppg` columns to anonymous users.
+* **PII avoidance:** Do not store personal information (email, phone, address) in `players` table.
+* **Rate limiting:** Implement pagination (20 players per page) and request throttling for public endpoints.
 
 ---
 
@@ -98,11 +188,13 @@
 | Feature          | Test Condition                                            |
 | ---------------- | --------------------------------------------------------- |
 | **Auth**         | User can sign up, sign in/out, and session persists.      |
-| **Players**      | Player list loads live from Supabase.                     |
+| **Players**      | Player list loads live from Supabase with pagination (20 per page). |
 | **Team Builder** | Budget and position limits enforced; captain selectable.  |
 | **Scoring View** | Player and team points display correctly with captain ×2. |
 | **Realtime**     | Adding `match_event` in Supabase updates score on device. |
 | **RLS**          | Users can only modify their own teams/rosters.            |
+| **Error Handling** | Network errors show retry button, loading states display, graceful degradation. |
+| **Performance**  | Players list loads within 2 seconds, lazy loading for large datasets. |
 
 ---
 

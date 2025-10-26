@@ -2,13 +2,36 @@
 
 - Always read this file and 01_PRD.md before coding.
 - Treat the user as the Product Owner.
-- Never make assumptions beyond what’s in context.
+- Never make assumptions beyond what's in context.
 - Always summarize your understanding before writing code.
 - Follow 02_ImplementationPlan.md for the next feature phase.
 - For UI → use Expo + React Native conventions.
 - For backend → use Supabase JS client.
 - Always comment your code for beginners (explain logic clearly).
 - When refactoring → explain reasoning before changing files.
-- When confused → ask clarifying questions, don’t hallucinate.
+- When confused → ask clarifying questions, don't hallucinate.
 - Output diffs clearly, not full files unless requested.
 - Keep code readable and modular (small components, named hooks).
+
+## Document Priority Order
+**Source of truth order (conflict resolution):** 01_PRD.md > 02_ImplementationPlan.md > 03_ProjectStructure.md > 04_UI_UX.md > 06_WorkflowRules.md > 05_BugTracker.md
+**Note:** This file (06_WorkflowRules.md) is process-only and does not override product/tech specs.
+
+## RLS Policy Reference
+- `fantasy_teams`: `user_id = auth.uid()` for all operations
+- `fantasy_rosters`: `team_id IN (SELECT id FROM fantasy_teams WHERE user_id = auth.uid())` for all operations  
+- `players`: `true` for SELECT (public read), no other operations for anon
+- Reference: https://supabase.com/docs/guides/auth/row-level-security
+
+## Code Quality Requirements
+- **TypeScript check:** Run `npx tsc --noEmit` before committing
+- **Linting:** Run `npx eslint . --ext .ts,.tsx` (add ESLint config if needed)
+- **Formatting:** Run `npx prettier --write .` (add Prettier config if needed)
+- **Testing:** UI/state changes must include basic tests or manual checklist
+- **Bug tracking:** Update `05_BugTracker.md` when new known issues are found during a phase
+- **Bug template:** Use the template in `05_BugTracker.md` for consistent bug reporting
+
+## Security Requirements
+- **Environment variables:** Only anon public keys go under `EXPO_PUBLIC_*`, never service-role or secrets
+- **Never commit:** `.env` files, API keys, or sensitive configuration
+- **Production:** Use EAS secrets or separate environment files for production
