@@ -1,39 +1,14 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView } from 'react-native';
-import { supabase } from './src/lib/supabaseClient';
+import React from 'react';
+import { View, Text } from 'react-native';
 
 export default function App() {
-  const [players, setPlayers] = useState<any[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      const { data, error } = await supabase
-        .from('players')
-        .select('*')
-        .order('price', { ascending: false })
-        .limit(10);
-      if (error) setError(error.message);
-      else setPlayers(data ?? []);
-      setLoading(false);
-    })();
-  }, []);
-
+  // Note: This file is not used with Expo Router
+  // Expo Router uses expo-router/entry as the main entry point
+  // This file is kept minimal for compatibility
   return (
-    <ScrollView contentContainerStyle={{ padding: 20 }}>
-      <Text style={{ fontWeight: 'bold', fontSize: 20, marginBottom: 12 }}>
-        Latvian Floorball Players
-      </Text>
-      {loading && <Text>Loading...</Text>}
-      {error && <Text style={{ color: 'red' }}>Error: {error}</Text>}
-      {!loading && !error && players.length === 0 && <Text>No players found.</Text>}
-      {players.map((p) => (
-        <Text key={p.id}>
-          {p.name} — {p.position} — {p.price}
-        </Text>
-      ))}
-    </ScrollView>
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <Text>App.tsx - Not used with Expo Router</Text>
+    </View>
   );
 }
 
