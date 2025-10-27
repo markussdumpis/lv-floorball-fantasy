@@ -72,16 +72,17 @@
 **Goalie Points Calculation:**
 - **Saves:** +0.1 per save (from `match_events` where `event_type = 'save'`)
 - **Win bonus:** +2 if team wins (from `matches.home_score` vs `matches.away_score`)
-- **GA bands:** Based on `goals_against` field in `match_events` where `event_type = 'goal_allowed'`
+- **GA bands:** Based on total goals allowed by the goalie's team in the match (per-match aggregate, not per-event)
   - 0 goals against = +8 points
   - 1-2 goals against = +5 points  
   - 3-5 goals against = +2 points
   - 6-9 goals against = -2 points
   - 10+ goals against = -5 points
+  - **Calculation:** For home goalie, use `matches.away_score`; for away goalie, use `matches.home_score`
 
 **Win Determination:** Match result based on `matches.home_score` vs `matches.away_score` (home_score > away_score = home team win)
 
-**Captain Multiplier:** Applied after all other calculations, captain's total points ×2
+**Captain Multiplier:** Apply captain multiplier after summing a player's match points; multiply the rostered captain's total by 2 in `fantasy_team_match_points` view.
 
 **Stacking Rules:** Bonuses and penalties are additive (e.g., goal + hat-trick = 1.5 + 3 = 4.5 points)
 
@@ -91,22 +92,23 @@
 
 ## 4. Pricing Model
 
-**Formula:**
+**Final Formula (Order of Operations):**
 1. Compute **FPPG (Fantasy Points Per Game)** from parsed stats (last 10 games or season average).
-2. Apply role boosts: D ×1.15, G ×1.10 (before percentile calculation).
+2. Apply role boosts: D ×1.15, G ×1.10 (boosts applied to FPPG before percentile calculation).
 3. Calculate percentile pricing by position using 90th percentile method:
    - Sort all players by boosted FPPG within position
-   - Price = base_price + (percentile_rank / 100) × (max_price - base_price)
-4. Apply gamma curve for top-player premium: final_price = base_price × (1 + (percentile/100)^γ) where γ = 1.9
-5. Price ranges: Forwards 4–13, Defenders 3–14, Goalies 5–12
-6. Median team (5F, 3D, 1G, 1 Flex) ≈ 95 credits
+   - Percentile price = base_price + (percentile_rank / 100) × (max_price - base_price)
+4. Apply gamma adjustment: adjusted_price = percentile_price × (1 + (percentile/100)^γ) where γ = 1.9
+5. Enforce min/max caps: final_price = CLAMP(adjusted_price, min_price, max_price)
+6. Price ranges: Forwards 4–13, Defenders 3–14, Goalies 5–12
+7. Median team (5F, 3D, 1G, 1 Flex) ≈ 95 credits
 
 **Example Calculation:**
 - Player: Forward with 2.5 FPPG, 85th percentile
-- Base price: 4, Max price: 13
-- Percentile price: 4 + (0.85 × 9) = 11.65
-- Gamma adjustment: 11.65 × (1 + 0.85^1.9) = 11.65 × 1.72 = 20.04
-- Final price: 13 (capped at max)
+- Step 1-2: FPPG = 2.5 (Forward, no boost)
+- Step 3: Percentile price = 4 + (0.85 × 9) = 11.65
+- Step 4: Gamma adjustment = 11.65 × (1 + 0.85^1.9) = 11.65 × 1.72 = 20.04
+- Step 5: Final price = CLAMP(20.04, 4, 13) = 13 (capped at max)
 
 **Implementation:** Run in Supabase function during CSV import, store in `players.price` column.
 
@@ -177,7 +179,7 @@
 * Supabase: Postgres DB, Auth, Realtime, RLS.
 * Environment variables stored in `/apps/mobile/.env`.
 * Public read for `players` table (limited columns only); secure writes for user data only.
-* **Players table RLS:** Only expose `id`, `name`, `position`, `team`, `price`, `fppg` columns to anonymous users.
+* **Players table access:** Create `public_players` VIEW exposing only `id`, `name`, `position`, `team`, `price`, `fppg` columns. Client fetches from `public_players` view instead of `players` table directly.
 * **PII avoidance:** Do not store personal information (email, phone, address) in `players` table.
 * **Rate limiting:** Implement pagination (20 players per page) and request throttling for public endpoints.
 
@@ -196,6 +198,8 @@
 | **Error Handling** | Network errors show retry button, loading states display, graceful degradation. |
 | **Performance**  | Players list loads within 2 seconds, lazy loading for large datasets. |
 
+**Consolidated Acceptance Checklist:** See `context/02_ImplementationPlan.md` Phase-by-Phase Acceptance section for detailed acceptance criteria mapped to implementation phases.
+
 ---
 
 ## 9. Risks & Mitigations
@@ -203,7 +207,7 @@
 | Risk                         | Mitigation                                                            |
 | ---------------------------- | --------------------------------------------------------------------- |
 | Inconsistent LFS scraping    | Manual cleanup for top players before import.                         |
-| Missing MVP/MVP awards       | Treat as optional, off by default.                                    |
+| Missing MVP awards            | Treat as optional, off by default.                                    |
 | Context overload in AI tools | Keep only `06_WorkflowRules.md` always loaded; load others as needed. |
 
 ---

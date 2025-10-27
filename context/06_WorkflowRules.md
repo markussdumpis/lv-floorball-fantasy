@@ -20,7 +20,7 @@
 ## RLS Policy Reference
 - `fantasy_teams`: `user_id = auth.uid()` for all operations
 - `fantasy_rosters`: `team_id IN (SELECT id FROM fantasy_teams WHERE user_id = auth.uid())` for all operations  
-- `players`: `true` for SELECT (public read), no other operations for anon
+- `players`: Create and expose `public_players` view for anon role with limited columns (`id`, `name`, `position`, `team`, `price`, `fppg`). Avoid direct table access from clients.
 - Reference: https://supabase.com/docs/guides/auth/row-level-security
 
 ## Code Quality Requirements
@@ -34,4 +34,7 @@
 ## Security Requirements
 - **Environment variables:** Only anon public keys go under `EXPO_PUBLIC_*`, never service-role or secrets
 - **Never commit:** `.env` files, API keys, or sensitive configuration
+- **Always commit:** `.env.example` with placeholder values for documentation
+- **Setup workflow:** Copy `.env.example` to `.env` and fill in real values locally
+- **Sharing:** Never share real keys in PRs, issues, or screenshots
 - **Production:** Use EAS secrets or separate environment files for production

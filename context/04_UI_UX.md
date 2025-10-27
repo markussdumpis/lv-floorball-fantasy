@@ -89,13 +89,23 @@ The app uses **Expo Router** with the following structure:
 ### 🧑‍🤝‍🧑 PlayerListScreen
 
 * Search bar + filters (by position, team, price)
-* Scrollable list of `PlayerCard`s
+* Scrollable list of `PlayerCard`s with infinite scroll (20 players per page)
+* Loading spinner at bottom during pagination load
+* Pull-to-refresh for manual refresh
 * Floating button to view selected players
+* Empty state: "No players found" with retry button
+* Error state: Error message with retry button
 
 **PlayerCard includes:**
 
 * Name, Team, Position, Price, Points
-* Add button (state changes to “Added”)
+* Add button (state changes to "Added")
+
+**Pagination Behavior:**
+* Load initial 20 players on mount
+* Auto-load next page when user scrolls near bottom (`onEndReached`)
+* Show loading spinner at bottom while fetching next page
+* Disable loading when all players loaded or error occurs
 
 ### ⚙️ TeamBuilderScreen
 

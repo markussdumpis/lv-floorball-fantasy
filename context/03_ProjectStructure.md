@@ -58,7 +58,7 @@ lv-floorball-fantasy/
 - **Hooks** handle data/state and may use `/src/lib/supabaseClient`.
 - **Components** are presentational (no DB calls, no navigation side-effects).
 - **Supabase client** exists **once** at `/src/lib/supabaseClient.ts`.
-- **App.tsx** is not used with Expo Router (uses expo-router/entry) and should be absent or minimal.
+- **Expo Router entry point:** With expo-router, use `expo-router/entry` as the main entry point. Do not use `index.ts` or `App.tsx` as root files. `_layout.tsx` is the canonical navigation entry.
 
 ---
 
