@@ -65,10 +65,10 @@ The app uses **Expo Router** with the following structure:
 
 **Tabs:**
 
-* 🏠 `Home` — Overview, upcoming matches, top scorers, your total points
-* 🧑‍🤝‍🧑 `Players` — Player list (filter + sort)
-* ⚙️ `Squad` — Fantasy team builder (validation + budget)
-* 👤 `Profile` — User info, team name, and logout
+* `Home` — Overview, upcoming matches, top scorers, your total points
+* `Players` — Player list (filter + sort)
+* `Squad` — Fantasy team builder (validation + budget)
+* `Profile` — User info, team name, and logout
 
 ---
 
