@@ -1,4 +1,7 @@
 # 03_ProjectStructure.md
+
+---
+
 ## Purpose
 Defines the folder/file structure for the Latvian Floorball Fantasy mobile MVP. Cursor must follow this layout and naming when creating or editing files.
 
@@ -21,15 +24,18 @@ lv-floorball-fantasy/
 │ │ ├── index.tsx # Home
 │ │ ├── players.tsx # Players list & filters
 │ │ ├── squad.tsx # Team builder
-│ │ └── profile.tsx # Profile/Auth placeholder
+│ │ ├── profile.tsx # Profile (signed-in experience)
+│ │ └── auth.tsx # Auth screen (rendered from _layout)
 │ ├── src/
 │ │ ├── lib/ # setup utils (supabaseClient, auth helpers)
+│ │ │ ├── auth.ts
 │ │ │ └── supabaseClient.ts
 │ │ ├── hooks/ # reusable logic (data/state)
+│ │ │ ├── useMatchEvents.ts
 │ │ │ └── usePlayers.ts
 │ │ ├── components/ # reusable UI pieces
 │ │ │ ├── PlayerCard.tsx
-│ │ │ ├── FilterChip.tsx
+│ │ │ ├── FilterBar.tsx
 │ │ │ └── BudgetBar.tsx
 │ │ └── types/ # shared TS types (Player, FantasyTeam, etc.)
 │ ├── assets/
@@ -38,9 +44,10 @@ lv-floorball-fantasy/
 │ ├── package.json
 │ └── tsconfig.json
 ├── services/ # server-side utilities (later)
-│ └── scraper/ # LFS scraping + GPT normalization (server only)
+│ └── README.md # placeholder until services land
 ├── supabase/
-│ └── migrations/ # SQL files / schema changes (optional)
+│ ├── README.md # how to apply database migrations
+│ └── migrations/ # SQL files / schema changes
 └── README.md
 
 ---
@@ -73,8 +80,12 @@ lv-floorball-fantasy/
 ## Standard Imports
 From a screen:
 ```ts
-import { usePlayers } from '../src/hooks/usePlayers'
-import { PlayerCard } from '../src/components/PlayerCard'
-import { supabase } from '../src/lib/supabaseClient'
+import { usePlayers } from '../src/hooks/usePlayers';
+import { PlayerCard } from '../src/components/PlayerCard';
+import { getSupabaseClient } from '../src/lib/supabaseClient';
+```
 From a component:
-import { Player } from '../src/types/Player'
+```ts
+import { Player } from '../src/types/Player';
+```
+Note: Supabase SQL views (player_match_points, fantasy_team_match_points) exist server-side only.

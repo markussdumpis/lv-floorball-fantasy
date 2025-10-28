@@ -1,5 +1,7 @@
 # 05_BugTracker.md
 
+---
+
 This file tracks known bugs, UI glitches, or Supabase issues during development.
 
 ## Severity Levels

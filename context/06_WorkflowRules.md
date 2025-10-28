@@ -1,5 +1,7 @@
 # Workflow Rules for Cursor Agent
 
+---
+
 - Always read this file and 01_PRD.md before coding.
 - Treat the user as the Product Owner.
 - Never make assumptions beyond what's in context.
@@ -12,6 +14,12 @@
 - When confused → ask clarifying questions, don't hallucinate.
 - Output diffs clearly, not full files unless requested.
 - Keep code readable and modular (small components, named hooks).
+
+## AI Collaboration Flow
+1. Start with Traycer review notes and confirm scope with the Product Owner before coding.
+2. Outline the change strategy (plan tool or written summary) so reviewers can follow along.
+3. Implement fixes iteratively, sharing diffs or checkpoints when risk is high.
+4. Re-run Traycer after changes to verify issues are resolved before handoff.
 
 ## Document Priority Order
 **Source of truth order (conflict resolution):** 01_PRD.md > 02_ImplementationPlan.md > 03_ProjectStructure.md > 04_UI_UX.md > 06_WorkflowRules.md > 05_BugTracker.md
@@ -38,3 +46,9 @@
 - **Setup workflow:** Copy `.env.example` to `.env` and fill in real values locally
 - **Sharing:** Never share real keys in PRs, issues, or screenshots
 - **Production:** Use EAS secrets or separate environment files for production
+### Handoff Checklist
+1. Run Traycer in Review mode → identify issues.
+2. Hand off fix plan to Cursor → implement changes.
+3. Commit results to Git.
+4. Run Traycer again → verify fixes.
+5. If stable → mark context as verified.

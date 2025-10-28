@@ -1,4 +1,4 @@
-#
+# 02_ImplementationPlan.md
 
 ---
 
@@ -26,7 +26,7 @@
    * **Security:** Only anon public keys go under `EXPO_PUBLIC_*`, never service-role or secrets.
    * **Production:** Use EAS secrets or separate `.env.production` for production keys.
    * **Setup instructions:** Copy `.env.example` to `.env` and fill in real values. Do not share real keys in PRs or issues.
-   * Create `src/lib/supabaseClient.ts` and export initialized client.
+   * Create `src/lib/supabaseClient.ts` that exports `getSupabaseClient()` + `isSupabaseConfigured()`. Client must lazily initialize, use AsyncStorage for auth persistence, and avoid throwing at import time.
 3. **DB: players table**
 
    * Columns: `id uuid pk`, `name text`, `position text check (position IN ('F', 'D', 'G'))`, `team text`, `price int`, `external_id text`, `fppg decimal`, timestamps.
@@ -51,8 +51,10 @@
 6. **UI: PlayerList screen**
 
    * Route: `/players` (stack/tab as per 03).
-   * Fetch with `supabase.from('players').select('*')` and render FlatList.
-   * Loading/empty/error states.
+   * Fetch with `getSupabaseClient().from('public_players').select('id, name, position, team, price, fppg')`.
+   * Support search, position, team filters, and sorting (`price_desc`, `price_asc`, `name_desc`, `name_asc`).
+   * Default pagination: 20 players per page via `range` queries; expose `teams[]` list derived from the view.
+   * Loading/empty/error states plus retry mechanics.
 
 ### Acceptance
 
@@ -87,6 +89,7 @@
    * `ProfileScreen`: shows user email + Sign Out.
 5. **Navigation Guard**
 
+   * Root `_layout.tsx` listens to `supabase.auth.onAuthStateChange` + `getSession()` to decide between app tabs and `AuthScreen`.
    * If no session → show `AuthScreen`; otherwise show app tabs.
 
 ### Acceptance
@@ -159,6 +162,7 @@
 
    * Subscribe to `match_events` table filtered by selected `match_id` using Supabase Realtime.
    * Channel: `match_events:match_id=eq.{selected_match_id}`
+   * Implement logic inside `src/hooks/useMatchEvents.ts` (stubbed during MVP) including retry/backoff, debounce, pagination, telemetry.
    * **Auth state handling:** Handle `supabase.auth.onAuthStateChange` token changes; rejoin channel when token refreshes.
    * **Reconnection logic:** Implement exponential backoff with jitter (initial delay 1s, max 32s, factor 2, ±20% jitter), max 5 retries.
    * **Telemetry:** Log connection lifecycle events (subscribed, error, closed) with screen-level status indicator.
@@ -288,3 +292,22 @@ export function usePlayers(page: number = 0, pageSize: number = 20) {
 
 * **Create ************************`/apps/mobile/.env`************************ and ************************`src/lib/supabaseClient.ts`**, then build **PlayerList** to verify live data.
 * Commit when PlayerList renders real rows from Supabase.
+
+---
+
+## Current Phase: Player List MVP — DONE ✅
+
+**Completed:** Full Player List MVP implementation with search, filters, pagination, and infinite scroll.
+
+**Features Implemented:**
+- ✅ Supabase client with environment variable validation
+- ✅ Updated Player type to single `name` string plus nullable `team`, `price`, `fppg`.
+- ✅ usePlayers hook with comprehensive filtering (search, position, team, sort) and pagination (25 per page)
+- ✅ PlayerCard component with position badge, price, and points display
+- ✅ FilterBar component with debounced search and horizontal scrollable filters
+- ✅ Players screen with loading, error, empty states and infinite scroll
+- ✅ Accessibility compliance (tap targets >= 44px)
+- ✅ Pull-to-refresh functionality
+- ✅ Error handling with retry buttons
+
+**Next Phase:** Ready for Team Builder implementation.

@@ -1,5 +1,7 @@
 # 04_UI_UX.md — Latvian Floorball Fantasy App
 
+---
+
 ## 🎨 Design Philosophy
 
 The app follows a **clean, dynamic, and modern sports UI**, inspired by **Premier League Fantasy**, adapted for Latvian floorball.
@@ -69,6 +71,7 @@ The app uses **Expo Router** with the following structure:
 * `Players` — Player list (filter + sort)
 * `Squad` — Fantasy team builder (validation + budget)
 * `Profile` — User info, team name, and logout
+*Emoji Tab Icons:* Tabs use emoji icons as placeholders during MVP. Replace with design system icons in Phase 4 after UI polish (documented here to prevent premature swaps).
 
 ---
 
@@ -98,7 +101,7 @@ The app uses **Expo Router** with the following structure:
 
 **PlayerCard includes:**
 
-* Name, Team, Position, Price, Points
+* Name, Team, Position, Price, FPPG snapshot
 * Add button (state changes to "Added")
 
 **Pagination Behavior:**
