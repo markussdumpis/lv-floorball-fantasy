@@ -1,0 +1,24 @@
+{
+  "name": "lfs-ingest",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/run.ts",
+    "scrape": "tsx src/scrape.ts",
+    "parse": "tsx src/parse.ts",
+    "import": "tsx src/runImport.ts",
+    "parse-match": "tsx src/parseOne.ts",
+    "dev-all": "tsx src/run.ts && tsx src/parseOne.ts && tsx src/runImport.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.46.0",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.4.5",
+    "undici": "^6.18.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.1",
+    "typescript": "^5.4.5"
+  }
+}

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { usePlayers } from '../src/hooks/usePlayers';
 import { PlayerCard } from '../src/components/PlayerCard';
@@ -10,11 +10,23 @@ export default function Players() {
     pageSize: 20,
   });
   const [selectedPosition, setSelectedPosition] = useState<'F' | 'D' | 'G' | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const displayedPlayers = useMemo(() => {
     if (!selectedPosition) return data;
     return data.filter(player => player.position === selectedPosition);
   }, [data, selectedPosition]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } catch (e) {
+      console.error('Failed to refresh players', e);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
 
   const renderFooter = () => {
     if (!hasMore) return null;
@@ -29,7 +41,7 @@ export default function Players() {
   const renderError = () => (
     <View style={styles.errorContainer}>
       <Text style={styles.errorText}>Error: {error}</Text>
-      <TouchableOpacity style={styles.retryButton} onPress={refresh}>
+      <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
         <Text style={styles.retryButtonText}>Retry</Text>
       </TouchableOpacity>
     </View>
@@ -38,7 +50,7 @@ export default function Players() {
   const renderEmpty = () => (
     <View style={styles.emptyContainer}>
       <Text style={styles.emptyText}>No players match your filters.</Text>
-      <TouchableOpacity style={styles.retryButton} onPress={refresh}>
+      <TouchableOpacity style={styles.retryButton} onPress={handleRefresh}>
         <Text style={styles.retryButtonText}>Refresh</Text>
       </TouchableOpacity>
     </View>
@@ -75,8 +87,8 @@ export default function Players() {
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}
         ListFooterComponent={renderFooter}
-        refreshing={loading && data.length > 0}
-        onRefresh={refresh}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={renderEmpty}
       />

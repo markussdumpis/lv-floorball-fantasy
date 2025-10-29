@@ -4,19 +4,27 @@ import { Player } from '../types/Player';
 
 interface PlayerCardProps {
   player: Player;
-  onPress?: () => void;
 }
 
-export function PlayerCard({ player, onPress }: PlayerCardProps) {
+export function PlayerCard({ player }: PlayerCardProps) {
+  const price =
+    typeof player.price === 'number' ? `${player.price} credits` : 'N/A';
+  const points =
+    typeof player.points_total === 'number' ? `${player.points_total.toFixed(1)} pts` : 'Points --';
+  const team = player.team || 'No Team';
+
   return (
     <View style={styles.container}>
       <View style={styles.info}>
         <Text style={styles.name}>{player.name}</Text>
-        <Text style={styles.details}>{player.position} • {player.team}</Text>
+        <Text style={styles.details}>{player.position} • {team}</Text>
       </View>
       <View style={styles.stats}>
-        <Text style={styles.price}>${player.price}</Text>
-        <Text style={styles.fppg}>{player.fppg.toFixed(1)} FPPG</Text>
+        <View style={styles.positionBadge}>
+          <Text style={styles.positionText}>{player.position}</Text>
+        </View>
+        <Text style={styles.price}>{price}</Text>
+        <Text style={styles.points}>{points}</Text>
       </View>
     </View>
   );
@@ -48,15 +56,27 @@ const styles = StyleSheet.create({
   stats: {
     alignItems: 'flex-end',
   },
+  positionBadge: {
+    backgroundColor: '#FF6B00',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
+  positionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   price: {
     color: '#FF6B00',
-    fontSize: 18,
-    fontWeight: 'bold',
+    fontSize: 16,
+    fontWeight: '600',
     marginBottom: 2,
   },
-  fppg: {
+  points: {
     color: '#22C55E',
     fontSize: 12,
+    fontWeight: '500',
   },
 });
-

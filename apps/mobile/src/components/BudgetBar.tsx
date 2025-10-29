@@ -7,13 +7,15 @@ interface BudgetBarProps {
 }
 
 export function BudgetBar({ spent, total }: BudgetBarProps) {
-  const percentage = (spent / total) * 100;
+  const ratio = Math.max(0, Math.min(spent / total, 1));
+  const percentage = ratio * 100;
   const remaining = total - spent;
+  const barColor = remaining < 0 ? '#F87171' : '#FF6B00';
 
   return (
     <View style={styles.container}>
       <View style={styles.barContainer}>
-        <View style={[styles.bar, { width: `${percentage}%` }]} />
+        <View style={[styles.bar, { width: `${percentage}%`, backgroundColor: barColor }]} />
       </View>
       <Text style={styles.text}>
         {remaining.toFixed(1)} / {total} credits remaining
@@ -43,4 +45,3 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
-

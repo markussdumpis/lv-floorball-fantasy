@@ -16,4 +16,6 @@ build/
 .env.*
 supabase/.env
 services/scraper/.env*
+services/lfs-ingest/.env*
+services/lfs-ingest/.cache/
 apps/mobile/.env*

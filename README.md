@@ -51,8 +51,19 @@ A fantasy sports application for Latvian floorball, built with React Native and 
 
 The app requires a Supabase database with the following setup:
 - `players` table with RLS policies
-- `public_players` view exposing limited columns for anonymous access
-- See `/context/02_ImplementationPlan.md` for detailed database schema and setup instructions
+- `public_players` view exposing limited columns (`id, name, position, team, price, fppg`) for anonymous access
+- Fantasy team tables (`gameweeks`, `fantasy_teams`, `fantasy_rosters`, `fantasy_transfers`) with RLS
+- Aggregation views (`player_match_points`, `fantasy_team_match_points`)
+
+Apply the SQL migrations in `supabase/migrations/` after provisioning your project:
+
+```bash
+supabase db push
+# or
+psql "$SUPABASE_DB_URL" -f supabase/migrations/0001_core_schema.sql
+```
+
+If the Supabase environment variables are missing, the mobile app will show a friendly error instead of crashing. Update `.env` with valid credentials to enable authentication and data fetching.
 
 ### Documentation
 
@@ -61,6 +72,8 @@ The app requires a Supabase database with the following setup:
 - **Project Structure**: `/context/03_ProjectStructure.md`
 - **UI/UX Guidelines**: `/context/04_UI_UX.md`
 - **Workflow Rules**: `/context/06_WorkflowRules.md`
+- **Supabase Schema**: `/supabase/migrations/`
+- **Backend Services Placeholder**: `/services/`
 
 ### Development
 

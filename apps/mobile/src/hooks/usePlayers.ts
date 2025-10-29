@@ -23,10 +23,10 @@ export function usePlayers(initial: PlayerFilters = {}) {
   const [data, setData] = useState<Player[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [teams, setTeams] = useState<string[]>([]);
   const debounce = useRef<NodeJS.Timeout | null>(null);
+  const pageRef = useRef(0);
 
   const fetchPage = useCallback(
     async (reset = false) => {
@@ -70,30 +70,33 @@ export function usePlayers(initial: PlayerFilters = {}) {
             q = q.order('name', { ascending: true });
         }
 
-        const from = (reset ? 0 : page) * pageSize;
+        if (reset) {
+          pageRef.current = 0;
+        }
+        const currentPage = pageRef.current;
+        const from = currentPage * pageSize;
         const to = from + pageSize - 1;
 
         const { data: rows, error: err, count } = await q.range(from, to);
         if (err) throw err;
 
-        setData(prev => (reset ? rows ?? [] : [...prev, ...(rows ?? [])]));
+        const nextRows = rows ?? [];
+        setData(prev => (reset ? nextRows : [...prev, ...nextRows]));
         setHasMore(
-          count !== null ? to + 1 < count : (rows?.length ?? 0) === pageSize
+          count !== null ? to + 1 < count : nextRows.length === pageSize
         );
-        if (reset) setPage(1);
-        else setPage(p => p + 1);
+        pageRef.current = currentPage + 1;
       } catch (e: any) {
         setError(e.message ?? 'Failed to load players');
       } finally {
         setLoading(false);
       }
     },
-    [filters, page, pageSize]
+    [filters, pageSize]
   );
 
   const refresh = useCallback(() => {
-    setPage(0);
-    fetchPage(true);
+    return fetchPage(true);
   }, [fetchPage]);
 
   const updateFilters = useCallback(

@@ -48,3 +48,6 @@ function FilterBarImpl({ selected, onSelect }: FilterBarProps) {
 }
 
 export default React.memo(FilterBarImpl);
+
+
+
