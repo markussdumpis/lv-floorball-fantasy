@@ -1,0 +1,7 @@
+
+> lfs-ingest@0.1.0 sync:players
+> tsx src/syncStagingToPlayers.ts # new sync: staging - + players
+
+[sync] Starting sync from players_stats_staging to players…
+[sync] Loaded 246 rows from players_stats_staging
+[sync] Found 2 existing teams, inserting 10 new teams
