@@ -1,42 +1,29 @@
-export type ParsedTeam = {
+export type Position = 'U' | 'A' | 'V';
+
+export interface PlayerStatsRow {
+  id?: string;
   name: string;
-  code: string;
-  externalId?: string | null;
-};
+  team: string;
+  position: Position;
+  games: number | null;
+  goals: number | null;
+  assists: number | null;
+  points: number | null;
+  shots: number | null;
+  saves: number | null;
+  save_pct: number | null;
+  pen_min: number | null;
+}
 
-export type ParsedPlayer = {
+export interface PlayerSeasonStatsRow {
   name: string;
-  teamCode: string;
-  jerseyNumber?: string | null;
-  position?: string | null;
-  externalId?: string | null;
-};
-
-export type ParsedMatch = {
-  externalId: string;
-  matchUrl?: string;
-  startsAt?: string | null;
-  homeTeamCode: string;
-  awayTeamCode: string;
-  homeScore?: number | null;
-  awayScore?: number | null;
-  raw?: Record<string, unknown>;
-};
-
-export type ParsedEvent = {
-  eventType: string;
-  period?: string | null;
-  tsSeconds?: number | null;
-  clock?: string | null;
-  teamCode?: string | null;
-  playerName?: string | null;
-  assistName?: string | null;
-  raw: Record<string, unknown>;
-};
-
-export type ParsedDocument = {
-  match: ParsedMatch;
-  teams: ParsedTeam[];
-  players: ParsedPlayer[];
-  events: ParsedEvent[];
-};
+  team: string;
+  position: Position;
+  games: number | null;
+  goals: number | null;
+  assists: number | null;
+  points: number | null;
+  saves: number | null;
+  save_pct: number | null;
+  penalty_min: number | null;
+}

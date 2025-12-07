@@ -4,12 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx src/run.ts",
-    "scrape": "tsx src/scrape.ts",
-    "parse": "tsx src/parse.ts",
-    "import": "tsx src/runImport.ts",
-    "parse-match": "tsx src/parseOne.ts",
-    "dev-all": "tsx src/run.ts && tsx src/parseOne.ts && tsx src/runImport.ts"
+    "seed:stats": "tsx src/seedFromStats.ts",
+    "refresh:stats": "tsx src/refreshFromStats.ts",
+    "sync:players": "tsx src/syncStagingToPlayers.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.46.0",
