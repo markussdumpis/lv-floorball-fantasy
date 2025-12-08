@@ -1,7 +1,14 @@
 import React, { Fragment } from 'react';
 import { View, Text, StyleSheet, Pressable, GestureResponderEvent } from 'react-native';
+import {
+  FLEX_ALLOWED_POSITIONS,
+  POSITIONS,
+  ROSTER_RULES,
+  type Position,
+} from '../constants/fantasyRules';
 import type { Player } from '../types/Player';
-import { RULES } from '../utils/fantasy';
+import { formatPriceMillions } from '../utils/format';
+import { getPlayerPrice, normalizePosition } from '../utils/fantasy';
 
 type SelectedListProps = {
   players: Player[];
@@ -11,17 +18,12 @@ type SelectedListProps = {
   onSetCaptain: (playerId: string) => void;
 };
 
-type GroupedPlayers = {
-  F: Player[];
-  D: Player[];
-  G: Player[];
-  FLEX: Player[];
-};
+type GroupedPlayers = Record<Position | 'FLEX', Player[]>;
 
 const SECTION_LABELS: Record<keyof GroupedPlayers, string> = {
-  F: 'Forwards',
+  A: 'Attackers',
   D: 'Defenders',
-  G: 'Goalie',
+  V: 'Goalie',
   FLEX: 'Flex',
 };
 
@@ -30,28 +32,27 @@ const buildGroups = (players: Player[], selectedIds: string[]): GroupedPlayers =
     .map(id => players.find(player => player.id === id))
     .filter((player): player is Player => Boolean(player));
 
-  const groups: GroupedPlayers = { F: [], D: [], G: [], FLEX: [] };
+  const groups: GroupedPlayers = { A: [], D: [], V: [], FLEX: [] };
 
   ordered.forEach(player => {
-    if (player.position === 'F') {
-      if (groups.F.length < RULES.F) {
-        groups.F.push(player);
-      } else {
-        groups.FLEX.push(player);
-      }
+    const rawPosition = player.position;
+    const position = normalizePosition(rawPosition);
+    const slot = groups[position];
+    if (!slot) {
+      console.warn('[Squad] No slot group for position', position, 'raw=', rawPosition);
+      return;
+    }
+    if (slot.length < ROSTER_RULES[position]) {
+      slot.push(player);
       return;
     }
 
-    if (player.position === 'D') {
-      if (groups.D.length < RULES.D) {
-        groups.D.push(player);
-      } else {
-        groups.FLEX.push(player);
-      }
+    if (FLEX_ALLOWED_POSITIONS.includes(position)) {
+      groups.FLEX.push(player);
       return;
     }
 
-    groups.G.push(player);
+    slot.push(player);
   });
 
   return groups;
@@ -93,6 +94,8 @@ export function SelectedList({
           ) : (
             groupPlayers.map(player => {
               const isCaptain = captainId === player.id;
+              const rawPrice = getPlayerPrice(player);
+              const priceLabel = rawPrice > 0 ? formatPriceMillions(rawPrice) : 'N/A';
               return (
                 <Pressable
                   key={player.id}
@@ -105,12 +108,12 @@ export function SelectedList({
                       {isCaptain ? ' (C)' : ''}
                     </Text>
                     <Text style={styles.playerMeta}>
-                      {player.team ?? 'No Team'} • {player.position}
+                      {player.team ?? 'No Team'} • {POSITIONS[normalizePosition(player.position)]}
                     </Text>
                   </View>
                   <View style={styles.rowActions}>
                     <Text style={styles.priceText}>
-                      {typeof player.price === 'number' ? `${player.price}` : '--'}
+                      {priceLabel}
                     </Text>
                     <Pressable
                       onPress={event => handleCaptainPress(event, player.id)}

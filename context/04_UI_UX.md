@@ -8,7 +8,7 @@ The app follows a **clean, dynamic, and modern sports UI**, inspired by **Premie
 
 Focus points:
 
-* Clear role distinction (F, D, G, Flex)
+* Clear role distinction (A, D, G, Flex)
 * Intuitive navigation between Home, Team Builder, and Player List
 * Fast readability of player stats and fantasy points
 * React Native StyleSheet-based design for Expo + React Native (MVP)
@@ -112,7 +112,9 @@ The app uses **Expo Router** with the following structure:
 
 ### ⚙️ TeamBuilderScreen
 
-* Formation layout grid (5F, 3D, 1G, 1 Flex)
+* Formation layout grid (4A, 2D, 1G, 1 Flex)
+* Remaining slot counters for Attackers, Defenders, Goalies, and Flex (out of 8 total)
+* Counters source roster totals from `ROSTER_RULES` in `apps/mobile/src/constants/fantasyRules.ts`
 * Budget and remaining credits bar
 * Validation feedback (real-time)
 * Captain selection UI (radio highlight)
@@ -138,7 +140,7 @@ The app uses **Expo Router** with the following structure:
 | `Button`    | Primary + secondary variants            | `backgroundColor: '#FF6B00', borderRadius: 16, paddingHorizontal: 16, paddingVertical: 8`          |
 | `Card`      | Used for players, matches, or summaries | `backgroundColor: '#2D3748', borderRadius: 12, padding: 12, shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3`                    |
 | `BudgetBar` | Displays remaining credits              | `backgroundColor: '#4A5568', borderRadius: 8, height: 8`                        |
-| `Badge`     | For roles (F, D, G, Flex)               | `backgroundColor: '#FF6B00', fontSize: 12, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12`            |
+| `Badge`     | For roles (A, D, G, Flex)               | `backgroundColor: '#FF6B00', fontSize: 12, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12`            |
 | `Input`     | Search/filter fields                    | `backgroundColor: '#2D3748', borderColor: '#4A5568', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8` |
 
 ---

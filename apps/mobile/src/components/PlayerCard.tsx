@@ -1,14 +1,17 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { POSITIONS } from '../constants/fantasyRules';
 import { Player } from '../types/Player';
+import { formatPriceMillions } from '../utils/format';
+import { getPlayerPrice } from '../utils/fantasy';
 
 interface PlayerCardProps {
   player: Player;
 }
 
 export function PlayerCard({ player }: PlayerCardProps) {
-  const price =
-    typeof player.price === 'number' ? `${player.price} credits` : 'N/A';
+  const rawPrice = getPlayerPrice(player);
+  const price = rawPrice > 0 ? `${formatPriceMillions(rawPrice)} credits` : 'N/A';
   const points =
     typeof player.points_total === 'number' ? `${player.points_total.toFixed(1)} pts` : 'Points --';
   const team = player.team || 'No Team';
@@ -17,11 +20,11 @@ export function PlayerCard({ player }: PlayerCardProps) {
     <View style={styles.container}>
       <View style={styles.info}>
         <Text style={styles.name}>{player.name}</Text>
-        <Text style={styles.details}>{player.position} • {team}</Text>
+        <Text style={styles.details}>{POSITIONS[player.position]} • {team}</Text>
       </View>
       <View style={styles.stats}>
         <View style={styles.positionBadge}>
-          <Text style={styles.positionText}>{player.position}</Text>
+          <Text style={styles.positionText}>{POSITIONS[player.position]}</Text>
         </View>
         <Text style={styles.price}>{price}</Text>
         <Text style={styles.points}>{points}</Text>

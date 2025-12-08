@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { formatPriceMillions } from '../utils/format';
 
 interface BudgetBarProps {
   spent: number;
@@ -18,7 +19,7 @@ export function BudgetBar({ spent, total }: BudgetBarProps) {
         <View style={[styles.bar, { width: `${percentage}%`, backgroundColor: barColor }]} />
       </View>
       <Text style={styles.text}>
-        {remaining.toFixed(1)} / {total} credits remaining
+        {formatPriceMillions(remaining)} / {formatPriceMillions(total)} remaining
       </Text>
     </View>
   );

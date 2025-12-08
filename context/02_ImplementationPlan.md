@@ -29,20 +29,21 @@
    * Create `src/lib/supabaseClient.ts` that exports `getSupabaseClient()` + `isSupabaseConfigured()`. Client must lazily initialize, use AsyncStorage for auth persistence, and avoid throwing at import time.
 3. **DB: players table**
 
-   * Columns: `id uuid pk`, `name text`, `position text check (position IN ('F', 'D', 'G'))`, `team text`, `price int`, `external_id text`, `fppg decimal`, timestamps.
+   * Columns: `id uuid pk`, `name text`, `position text check (position IN ('A', 'D', 'G'))`, `team text`, `price int`, `external_id text`, `fppg decimal`, timestamps.
    * RLS: public read; write restricted.
    * Seed minimal data (5–10 players) from CSV.
-   * Note: `position` is an enum (F, D, G). Flex is a roster slot accepting players with position F or D, not a player position.
+   * Note: `position` is an enum (A, D, G). Flex is a roster slot accepting players with position A or D, not a player position.
 4. **Data Pipeline: Price Calculation**
    * CSV fields: `external_id`, `name`, `position`, `team`, `season`, `goals`, `assists`, `saves`, `goals_against`, `games_played`
    * Name normalization: GPT removes accents, standardizes spelling, handles nicknames
    * ID mapping: Create `external_id` → `internal_id` mapping table for stable references
    * **Pricing formula (same as PRD):** Compute FPPG, apply role boosts (D ×1.15, G ×1.10), calculate percentile pricing, apply gamma adjustment (γ=1.9), enforce min/max caps per position
-   * Run pricing function during CSV import, store in `players.price` column
+   * Run pricing function during CSV import, store in `players.price` column.
+   * Recalculate price targets to ensure the 8-player roster economy still centers around ~95 credits.
 
 5. **Importer Mapping**
    * **CSV→DB column mapping:**
-     * `players.csv`: `external_id` → `external_id`, `name` → `name`, `position` → `position` (enum: F/D/G), `team` → `team`, `season` → `season`, `goals` → `goals`, `assists` → `assists`, `saves` → `saves`, `goals_against` → `goals_against`, `games_played` → `games_played`
+     * `players.csv`: `external_id` → `external_id`, `name` → `name`, `position` → `position` (enum: A/D/G), `team` → `team`, `season` → `season`, `goals` → `goals`, `assists` → `assists`, `saves` → `saves`, `goals_against` → `goals_against`, `games_played` → `games_played`
      * `matches.csv`: `external_id` → `external_id`, `home_team` → `home_team`, `away_team` → `away_team`, `home_score` → `home_score`, `away_score` → `away_score`, `start_time` → `start_time`, `season` → `season`
      * `match_events.csv`: `external_id` → `external_id`, `match_id` → `match_id` (FK lookup), `player_id` → `player_id` (FK lookup), `event_type` → `event_type` (enum), `minute` → `minute`, `timestamp` → `timestamp`
    * **Enum translation:** `event_type` enum values must match exactly: `goal`, `assist`, `hat_trick`, `penalty_shot_scored`, `penalty_shot_missed`, `minor_2`, `double_minor`, `red_card`, `mvp`, `save`, `goal_allowed` (case-sensitive).
@@ -122,9 +123,10 @@
    * Server-side enforcement: Trigger or constraint prevents multiple captains per team+gameweek.
 2. **Validation (client)**
 
-   * Role counters: 5F, 3D, 1G, 1 Flex (accepts F or D players).
+   * Role counters: 4A, 2D, 1G, 1 Flex (accepts A or D players).
    * Budget bar: cannot exceed 100 credits; disable Add when over.
-   * Flex slot validation: only allow players with position F or D, UI does not show Flex as a player position filter option.
+   * Flex slot validation: only allow players with position A or D, UI does not show Flex as a player position filter option.
+   * Import roster math from `ROSTER_RULES` in `apps/mobile/src/constants/fantasyRules.ts` to avoid hardcoding counts.
 3. **UI**
 
    * `TeamBuilderScreen`: two panes (players / my team).
@@ -136,7 +138,7 @@
 
 ### Acceptance
 
-* Cannot add 6th Forward; cannot exceed 100 credits.
+* Cannot add 5th Attacker; cannot exceed 100 credits.
 * Exactly one captain per gameweek.
 * Data persists and reloads correctly across app restarts.
 
@@ -262,7 +264,7 @@ export function usePlayers(page: number = 0, pageSize: number = 20) {
 |-------------|-------|---------------------|------------|
 | **Auth** | 2 | User can sign up, sign in/out, session persists | 1. Sign up with new email<br>2. Sign out and sign in<br>3. Close app, reopen → session persists |
 | **Players** | 1, 5 | Player list loads with pagination (20/page) | 1. Load PlayerList screen<br>2. Verify initial 20 players load<br>3. Scroll to bottom → next 20 load<br>4. Verify load time < 2s |
-| **Team Builder** | 3 | Budget (100 max) and position limits enforced | 1. Add 6th forward → blocked<br>2. Exceed 100 credits → blocked<br>3. Select captain → only one active |
+| **Team Builder** | 3 | Budget (100 max) and position limits enforced | 1. Add 5th attacker → blocked<br>2. Exceed 100 credits → blocked<br>3. Select captain → only one active |
 | **Scoring View** | 4 | Points display with captain ×2 | 1. View player match points<br>2. View team total with captain bonus<br>3. Captain shows doubled points |
 | **Realtime** | 4 | Live score updates | 1. Insert match_event in Supabase<br>2. Verify score updates on device<br>3. Verify connection status visible |
 | **RLS** | 2, 3 | Users can only modify own data | 1. Try to access other user's team → denied<br>2. Verify public_players view accessible |

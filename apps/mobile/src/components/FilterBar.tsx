@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Pressable, Text, type PressableProps, type TextProps, type ViewProps } from 'react-native';
+import type { Position } from '../constants/fantasyRules';
 
-type PositionValue = 'F' | 'D' | 'G' | null;
+type PositionValue = Position | null;
 
 interface FilterBarProps {
   selected: PositionValue;
@@ -40,14 +41,22 @@ function FilterBarImpl({ selected, onSelect }: FilterBarProps) {
       style={{ minHeight: 56 }}
     >
       <Btn label="All" val={null} />
-      <Btn label="F" val="F" />
-      <Btn label="D" val="D" />
-      <Btn label="G" val="G" />
+      <Btn label="Attackers" val="A" />
+      <Btn label="Defenders" val="D" />
+      <Btn label="Goalies" val="V" />
     </ViewNW>
   );
 }
 
 export default React.memo(FilterBarImpl);
+
+
+
+
+
+
+
+
 
 
 

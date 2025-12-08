@@ -10,6 +10,7 @@
 - For UI → use Expo + React Native conventions.
 - For backend → use Supabase JS client.
 - Always comment your code for beginners (explain logic clearly).
+- When implementing roster math, reuse `ROSTER_RULES` (or successor constants) instead of hardcoding counts.
 - When refactoring → explain reasoning before changing files.
 - When confused → ask clarifying questions, don't hallucinate.
 - Output diffs clearly, not full files unless requested.

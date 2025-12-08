@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import type { Position } from '../constants/fantasyRules';
 import type { Player } from '../types/Player';
 
 export type PlayerFilters = {
   search?: string;
-  position?: 'F' | 'D' | 'G' | 'ALL';
+  position?: Position | 'ALL';
   team?: string | 'ALL';
   sort?: 'name_asc' | 'name_desc' | 'price_asc' | 'price_desc';
   pageSize?: number;
@@ -43,7 +44,10 @@ export function usePlayers(initial: PlayerFilters = {}) {
         const supabase = getSupabaseClient();
         let q = supabase
           .from('players')
-          .select('id, name, position, team, price, points_total', { count: 'exact' });
+          .select(
+            'id, name, position, team, price_final, price_manual, price_computed, points_total',
+            { count: 'exact' }
+          );
 
         if (filters.search && filters.search.trim()) {
           const s = filters.search.trim();
@@ -58,10 +62,10 @@ export function usePlayers(initial: PlayerFilters = {}) {
 
         switch (filters.sort) {
           case 'price_asc':
-            q = q.order('price', { ascending: true, nullsFirst: true });
+            q = q.order('price_final', { ascending: true, nullsFirst: true });
             break;
           case 'price_desc':
-            q = q.order('price', { ascending: false, nullsFirst: false });
+            q = q.order('price_final', { ascending: false, nullsFirst: false });
             break;
           case 'name_desc':
             q = q.order('name', { ascending: false });

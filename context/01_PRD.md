@@ -27,13 +27,14 @@
 
 ### Team Roster
 
-* Total 10 players:
+* Total 8 players:
 
-  * 5 Forwards (F)
-  * 3 Defenders (D)
+  * 4 Attackers (A)
+  * 2 Defenders (D)
   * 1 Goalie (G)
-  * 1 Flex (accepts players with position F or D, not a player position itself)
+  * 1 Flex (accepts players with position A or D, not a player position itself)
 * One captain per gameweek → **captain's points ×2**.
+* Canonical roster counts live in `apps/mobile/src/constants/fantasyRules.ts`.
 * **Gameweek definition:** Calendar-based weeks (Monday to Sunday), starting from season start date.
 
 ### Transfers
@@ -64,7 +65,7 @@
 - `goal_allowed` - Goalkeeper allows a goal
 
 **Points per Role:**
-**Forwards:** Goal +1.5, Assist +1.0
+**Attackers:** Goal +1.5, Assist +1.0
 **Defenders:** Goal +2.0, Assist +1.5
 **All skaters:** Hat-trick +3, Penalty shot scored +0.5, missed –0.5, Minor 2 –0.5, Double minor –2, Red card –6, MVP +2 *(if available)*
 **Goalies:** +0.1 per save, +2 win (if reliable); GA bands → 0 = +8, 1–2 = +5, 3–5 = +2, 6–9 = –2, ≥10 = –5
@@ -100,12 +101,12 @@
    - Percentile price = base_price + (percentile_rank / 100) × (max_price - base_price)
 4. Apply gamma adjustment: adjusted_price = percentile_price × (1 + (percentile/100)^γ) where γ = 1.9
 5. Enforce min/max caps: final_price = CLAMP(adjusted_price, min_price, max_price)
-6. Price ranges: Forwards 4–13, Defenders 3–14, Goalies 5–12
-7. Median team (5F, 3D, 1G, 1 Flex) ≈ 95 credits
+6. Price ranges: Attackers 4–13, Defenders 3–14, Goalies 5–12
+7. Median team (4A, 2D, 1G, 1 Flex) ≈ 95 credits
 
 **Example Calculation:**
-- Player: Forward with 2.5 FPPG, 85th percentile
-- Step 1-2: FPPG = 2.5 (Forward, no boost)
+- Player: Attacker with 2.5 FPPG, 85th percentile
+- Step 1-2: FPPG = 2.5 (Attacker, no boost)
 - Step 3: Percentile price = 4 + (0.85 × 9) = 11.65
 - Step 4: Gamma adjustment = 11.65 × (1 + 0.85^1.9) = 11.65 × 1.72 = 20.04
 - Step 5: Final price = CLAMP(20.04, 4, 13) = 13 (capped at max)
@@ -127,7 +128,7 @@
 **players.csv:**
 - `external_id` (string, unique, stable across seasons)
 - `name` (string, normalized by GPT)
-- `position` (enum: F, D, G)
+- `position` (enum: A, D, G)
 - `team` (string, team code)
 - `season` (string, e.g., "2024-25")
 - `goals` (integer)

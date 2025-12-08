@@ -181,6 +181,22 @@ export function cleanText(value: string): string {
   return value.replace(/\s+/g, ' ').replace(/\u00a0/g, ' ').trim();
 }
 
+let loggedCleanNameExample = false;
+
+// Extracts a readable player name from HTML fragments in the LFS table cells.
+export function extractCleanName(html: string): string {
+  const withoutEntities = (html ?? '').replace(/&nbsp;/gi, ' ');
+  const withoutTags = withoutEntities
+    .replace(/<\/?(span|a)[^>]*>/gi, '')
+    .replace(/<[^>]*>/g, '');
+  const clean = cleanText(withoutTags);
+  if (!loggedCleanNameExample && clean) {
+    console.log('[parse] Clean name example:', clean);
+    loggedCleanNameExample = true;
+  }
+  return clean;
+}
+
 export function parseNumber(value: string | undefined): number | null {
   if (!value) {
     return null;

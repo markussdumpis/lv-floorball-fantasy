@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { usePlayers } from '../src/hooks/usePlayers';
+import type { Position } from '../src/constants/fantasyRules';
 import { PlayerCard } from '../src/components/PlayerCard';
 import FilterBar from '../src/components/FilterBar';
 
@@ -9,7 +10,7 @@ export default function Players() {
     sort: 'price_desc',
     pageSize: 20,
   });
-  const [selectedPosition, setSelectedPosition] = useState<'F' | 'D' | 'G' | null>(null);
+  const [selectedPosition, setSelectedPosition] = useState<Position | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const displayedPlayers = useMemo(() => {
@@ -82,7 +83,8 @@ export default function Players() {
       <FlatList
         data={displayedPlayers}
         renderItem={({ item }) => <PlayerCard player={item} />}
-        keyExtractor={(item) => item.id}
+        // Use the UUID as a unique key to avoid duplicate key warnings.
+        keyExtractor={(item) => item.id.toString()}
         contentContainerStyle={styles.list}
         onEndReached={loadMore}
         onEndReachedThreshold={0.5}

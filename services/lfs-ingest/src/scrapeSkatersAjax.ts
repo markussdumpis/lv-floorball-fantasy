@@ -5,7 +5,7 @@ import {
   extractDataArray,
   valueToString,
 } from './ajaxUtils.js';
-import { cleanText, parseNumber, resolvePosition } from './html.js';
+import { cleanText, extractCleanName, parseNumber, resolvePosition } from './html.js';
 import type { EnvConfig } from './env.js';
 import type { PlayerStatsRow, Position } from './types.js';
 
@@ -63,7 +63,7 @@ function mapArrayToSkater(row: unknown): PlayerStatsRow | null {
     return null;
   }
 
-  const name = cleanText(valueToString(row[1]));
+  const name = extractCleanName(valueToString(row[1]));
   const team = cleanText(valueToString(row[2]));
   if (!name || !team) {
     return null;
@@ -87,7 +87,7 @@ function mapArrayToSkater(row: unknown): PlayerStatsRow | null {
 }
 
 function mapRecordToSkater(record: Record<string, unknown>): PlayerStatsRow | null {
-  const name = cleanText(
+  const name = extractCleanName(
     getFirstValue(record, ['name', 'player', 'piel', 'vārds', 'vards', 'speletajs']),
   );
   const team = cleanText(getFirstValue(record, ['team', 'komanda', 'klubs']));

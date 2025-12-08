@@ -30,6 +30,8 @@ lv-floorball-fantasy/
 │ │ ├── lib/ # setup utils (supabaseClient, auth helpers)
 │ │ │ ├── auth.ts
 │ │ │ └── supabaseClient.ts
+│ │ ├── constants/ # shared config (fantasy rules, etc.)
+│ │ │ └── fantasyRules.ts
 │ │ ├── hooks/ # reusable logic (data/state)
 │ │ │ ├── useMatchEvents.ts
 │ │ │ └── usePlayers.ts
@@ -66,6 +68,7 @@ lv-floorball-fantasy/
 - **Components** are presentational (no DB calls, no navigation side-effects).
 - **Supabase client** exists **once** at `/src/lib/supabaseClient.ts`.
 - **Expo Router entry point:** With expo-router, use `expo-router/entry` as the main entry point. Do not use `index.ts` or `App.tsx` as root files. `_layout.tsx` is the canonical navigation entry.
+- **Roster rules:** UI and hooks (e.g., `TeamBuilder`) must import counts from `apps/mobile/src/constants/fantasyRules.ts` instead of hardcoding totals.
 
 ---
 

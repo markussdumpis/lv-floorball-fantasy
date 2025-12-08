@@ -5,7 +5,7 @@ import {
   extractDataArray,
   valueToString,
 } from './ajaxUtils.js';
-import { cleanText, parseNumber, parsePercent } from './html.js';
+import { cleanText, extractCleanName, parseNumber, parsePercent } from './html.js';
 import type { EnvConfig } from './env.js';
 import type { PlayerStatsRow } from './types.js';
 
@@ -63,7 +63,7 @@ function mapArrayToGoalie(row: unknown): PlayerStatsRow | null {
     return null;
   }
 
-  const name = cleanText(valueToString(row[1]));
+  const name = extractCleanName(valueToString(row[1]));
   const team = cleanText(valueToString(row[2]));
   if (!name || !team) {
     return null;
@@ -85,7 +85,7 @@ function mapArrayToGoalie(row: unknown): PlayerStatsRow | null {
 }
 
 function mapRecordToGoalie(record: Record<string, unknown>): PlayerStatsRow | null {
-  const name = cleanText(
+  const name = extractCleanName(
     getFirstValue(record, ['name', 'player', 'vartsargs', 'vārtsargs', 'vards']),
   );
   const team = cleanText(getFirstValue(record, ['team', 'komanda']));

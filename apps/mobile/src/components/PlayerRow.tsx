@@ -1,6 +1,9 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { POSITIONS } from '../constants/fantasyRules';
 import type { Player } from '../types/Player';
+import { formatPriceMillions } from '../utils/format';
+import { getPlayerPrice } from '../utils/fantasy';
 
 type PlayerRowProps = {
   player: Player;
@@ -10,8 +13,9 @@ type PlayerRowProps = {
 };
 
 export function PlayerRow({ player, selected, disabled, onToggle }: PlayerRowProps) {
-  const priceLabel =
-    typeof player.price === 'number' ? `${player.price} credits` : 'Price --';
+  const rawPrice = getPlayerPrice(player);
+  const priceValue = rawPrice > 0 ? formatPriceMillions(rawPrice) : 'N/A';
+  const priceLabel = priceValue === 'N/A' ? 'Price N/A' : `${priceValue} credits`;
   const teamLabel = player.team ?? 'No Team';
 
   const handlePress = () => {
@@ -27,7 +31,7 @@ export function PlayerRow({ player, selected, disabled, onToggle }: PlayerRowPro
       <View style={styles.info}>
         <Text style={styles.name}>{player.name}</Text>
         <Text style={styles.meta}>
-          {player.position} • {teamLabel}
+          {POSITIONS[player.position]} • {teamLabel}
         </Text>
       </View>
       <View style={styles.actions}>
