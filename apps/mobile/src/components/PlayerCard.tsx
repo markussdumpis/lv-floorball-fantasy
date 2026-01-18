@@ -3,15 +3,17 @@ import { View, Text, StyleSheet } from 'react-native';
 import { POSITIONS } from '../constants/fantasyRules';
 import { Player } from '../types/Player';
 import { formatPriceMillions } from '../utils/format';
-import { getPlayerPrice } from '../utils/fantasy';
 
 interface PlayerCardProps {
   player: Player;
 }
 
 export function PlayerCard({ player }: PlayerCardProps) {
-  const rawPrice = getPlayerPrice(player);
-  const price = rawPrice > 0 ? `${formatPriceMillions(rawPrice)} credits` : 'N/A';
+  const rawPrice = player.price_final;
+  const price =
+    typeof rawPrice === 'number' && !Number.isNaN(rawPrice)
+      ? `${formatPriceMillions(rawPrice)} credits`
+      : 'N/A';
   const points =
     typeof player.points_total === 'number' ? `${player.points_total.toFixed(1)} pts` : 'Points --';
   const team = player.team || 'No Team';

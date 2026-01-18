@@ -8,7 +8,7 @@ import {
 } from '../constants/fantasyRules';
 import type { Player } from '../types/Player';
 import { formatPriceMillions } from '../utils/format';
-import { getPlayerPrice, normalizePosition } from '../utils/fantasy';
+import { normalizePosition } from '../utils/fantasy';
 
 type SelectedListProps = {
   players: Player[];
@@ -94,8 +94,11 @@ export function SelectedList({
           ) : (
             groupPlayers.map(player => {
               const isCaptain = captainId === player.id;
-              const rawPrice = getPlayerPrice(player);
-              const priceLabel = rawPrice > 0 ? formatPriceMillions(rawPrice) : 'N/A';
+              const rawPrice = player.price_final;
+              const priceLabel =
+                typeof rawPrice === 'number' && !Number.isNaN(rawPrice)
+                  ? formatPriceMillions(rawPrice)
+                  : 'N/A';
               return (
                 <Pressable
                   key={player.id}

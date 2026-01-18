@@ -3,7 +3,6 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { POSITIONS } from '../constants/fantasyRules';
 import type { Player } from '../types/Player';
 import { formatPriceMillions } from '../utils/format';
-import { getPlayerPrice } from '../utils/fantasy';
 
 type PlayerRowProps = {
   player: Player;
@@ -13,8 +12,10 @@ type PlayerRowProps = {
 };
 
 export function PlayerRow({ player, selected, disabled, onToggle }: PlayerRowProps) {
-  const rawPrice = getPlayerPrice(player);
-  const priceValue = rawPrice > 0 ? formatPriceMillions(rawPrice) : 'N/A';
+  const priceValue =
+    typeof player.price_final === 'number' && !Number.isNaN(player.price_final)
+      ? formatPriceMillions(player.price_final)
+      : 'N/A';
   const priceLabel = priceValue === 'N/A' ? 'Price N/A' : `${priceValue} credits`;
   const teamLabel = player.team ?? 'No Team';
 

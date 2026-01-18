@@ -9,6 +9,7 @@ import {
   RefreshControl,
   TouchableOpacity,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { usePlayers } from '../src/hooks/usePlayers';
 import type { Player } from '../src/types/Player';
 import FilterBar from '../src/components/FilterBar';
@@ -21,6 +22,7 @@ import {
   ROSTER_LIMIT,
   canSelect,
   countByPos,
+  getPlayerPrice,
   remainingBudget,
   totalPrice,
   selectionError,
@@ -31,6 +33,7 @@ import { getSupabaseClient } from '../src/lib/supabaseClient';
 type PositionFilter = Position | null;
 
 export default function Squad() {
+  const router = useRouter();
   const { data, loading, error, hasMore, loadMore, refresh } = usePlayers({
     sort: 'price_desc',
     pageSize: 25,
@@ -98,6 +101,13 @@ export default function Squad() {
         const reason = selectionError(player, players, prev);
         if (reason) {
           Alert.alert('Cannot add player', reason);
+          return prev;
+        }
+        const price = getPlayerPrice(player);
+        const currentTotal = totalPrice(players, prev);
+        const newTotal = currentTotal + price;
+        if (newTotal > TOTAL_BUDGET) {
+          Alert.alert('Budget exceeded', 'Not enough budget to add this player.');
           return prev;
         }
         return [...prev, playerId];
@@ -246,7 +256,7 @@ export default function Squad() {
   const renderPlayer = useCallback(
     ({ item }: { item: Player }) => {
       const selected = selectedIds.includes(item.id);
-      const disabled = !selected && !canSelect(item, players, selectedIds);
+      const disabled = !selected && (!canSelect(item, players, selectedIds) || budgetLeft <= 0);
       return (
         <PlayerRow
           player={item}
@@ -256,7 +266,7 @@ export default function Squad() {
         />
       );
     },
-    [players, selectedIds, handleTogglePlayer]
+    [players, selectedIds, handleTogglePlayer, budgetLeft]
   );
 
   const listFooter = useMemo(() => {
@@ -334,6 +344,11 @@ export default function Squad() {
         ListHeaderComponent={
           <View>
             <Text style={styles.heading}>Build Your Squad</Text>
+            <View style={styles.myPointsButtonWrapper}>
+              <TouchableOpacity style={styles.myPointsButton} onPress={() => router.push('/my-points')}>
+                <Text style={styles.myPointsButtonText}>View My Points</Text>
+              </TouchableOpacity>
+            </View>
             <FilterBar selected={selectedPosition} onSelect={setSelectedPosition} />
             <View style={styles.summaryCard}>
               <Text style={styles.summaryRow}>
@@ -390,6 +405,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 24,
     marginBottom: 12,
+  },
+  myPointsButtonWrapper: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
+  myPointsButton: {
+    backgroundColor: '#3B82F6',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  myPointsButtonText: {
+    color: '#F8FAFC',
+    fontSize: 14,
+    fontWeight: '700',
   },
   summaryCard: {
     backgroundColor: '#0F172A',

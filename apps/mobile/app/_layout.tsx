@@ -100,6 +100,13 @@ export default function RootLayout() {
           tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>👤</Text>,
         }}
       />
+      <Tabs.Screen
+        name="my-points"
+        options={{
+          title: 'My Points',
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

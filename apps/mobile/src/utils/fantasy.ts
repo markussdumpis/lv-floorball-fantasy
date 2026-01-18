@@ -38,7 +38,7 @@ export function countByPos(players: Player[], selectedIds: string[]): PositionCo
 }
 
 export function getPlayerPrice(player: Player): number {
-  const raw = player.price_final ?? player.price_computed ?? 0;
+  const raw = player.price_final;
   return typeof raw === 'number' && !Number.isNaN(raw) ? raw : 0;
 }
 

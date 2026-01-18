@@ -7,6 +7,9 @@
     "seed:stats": "tsx src/seedFromStats.ts",
     "refresh:stats": "tsx src/refreshFromStats.ts",
     "sync:players": "tsx src/syncStagingToPlayers.ts",
+    "compute:prices": "tsx src/computePrices.ts",
+    "compute:match-points": "tsx src/computeMatchPoints.ts",
+    "scrape:match": "tsx src/scrapeMatchProtocol.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
