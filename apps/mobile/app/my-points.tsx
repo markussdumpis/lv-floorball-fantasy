@@ -26,11 +26,10 @@ export default function MyPointsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<PlayerPointsRow[]>([]);
   const [teamName, setTeamName] = useState<string | null>(null);
-  const [matchLabel, setMatchLabel] = useState<string | null>(null);
 
   const totalPoints = useMemo(
     () => rows.reduce((sum, row) => sum + (Number.isFinite(row.displayPoints) ? row.displayPoints : 0), 0),
-    [rows]
+    [rows],
   );
 
   const loadPoints = useCallback(async () => {
@@ -119,25 +118,25 @@ export default function MyPointsScreen() {
       }
       const playersMap = new Map((playerDetails ?? []).map(player => [player.id, player]));
 
-      console.log(`${LOG_PREFIX} Step 5: fetch latest finished match`);
-      const { data: latestMatch, error: matchError } = await supabase
+      console.log(`${LOG_PREFIX} Step 5: fetch finished match ids for season 2025-26`);
+      const { data: finishedMatches, error: matchError } = await supabase
         .from('matches')
-        .select('id, date, status')
+        .select('id, date')
         .eq('status', 'finished')
-        .order('date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      console.log(`${LOG_PREFIX} Step 5 rows`, latestMatch ? 1 : 0);
+        .eq('season', '2025-26')
+        .order('date', { ascending: true });
+      const matchIds = (finishedMatches ?? []).map(m => (m as any).id);
+      console.log(`${LOG_PREFIX} Step 5 finished matches`, matchIds.length);
 
       if (matchError) {
         console.error(`${LOG_PREFIX} Step 5 error`, matchError);
-        setError(matchError.message ?? 'Failed to load latest finished match.');
+        setError(matchError.message ?? 'Failed to load finished matches.');
         setRows([]);
         return;
       }
 
-      if (!latestMatch) {
-        console.log(`${LOG_PREFIX} No finished match found; showing 0 points.`);
+      if (matchIds.length === 0) {
+        console.log(`${LOG_PREFIX} No finished matches for season; showing 0 points.`);
         setError('No finished matches yet');
         const zeroRows = roster.map(row => {
           const player = playersMap.get(row.player_id);
@@ -156,36 +155,56 @@ export default function MyPointsScreen() {
         setRows(zeroRows);
         return;
       }
-      console.log(`${LOG_PREFIX} Latest match id`, latestMatch.id);
-      const matchDate = (latestMatch as any).date ? new Date((latestMatch as any).date) : null;
-      setMatchLabel(matchDate ? matchDate.toISOString().split('T')[0] : null);
 
       console.log(
-        `${LOG_PREFIX} Step 6: fetch player_match_points_view for match ${latestMatch.id} and ${playerIds.length} players`
+        `${LOG_PREFIX} Step 6: fetch player_match_points_view for ${playerIds.length} players across ${matchIds.length} matches`
       );
       const { data: pointsRows, error: pointsError } = await supabase
         .from('player_match_points_view')
-        .select('player_id, match_id, points')
-        .eq('match_id', latestMatch.id)
+        .select('player_id, team_id, match_id, points, goals, assists, pen_min, position')
+        .in('match_id', matchIds)
         .in('player_id', playerIds);
-      console.log(`${LOG_PREFIX} Step 6 rows`, pointsRows?.length ?? 0);
+      console.log(`${LOG_PREFIX} Step 6 rows`, pointsRows?.length ?? 0, 'firstRow', pointsRows?.[0]);
 
       if (pointsError) {
         console.error(`${LOG_PREFIX} Step 6 error`, pointsError);
         setError(pointsError.message ?? 'Failed to load player match points.');
       }
 
-      const pointsMap = new Map<string, number>();
+      const totalsMap = new Map<
+        string,
+        { points: number; goals: number; assists: number; penMin: number; position: string | null }
+      >();
       (pointsRows ?? []).forEach(row => {
+        const pid = (row as any).player_id;
         const rawPoints = (row as any).points ?? 0;
         const normalized = typeof rawPoints === 'number' ? rawPoints : Number(rawPoints) || 0;
-        pointsMap.set((row as any).player_id, normalized);
+        const goals = Number((row as any).goals ?? 0) || 0;
+        const assists = Number((row as any).assists ?? 0) || 0;
+        const penMin = Number((row as any).pen_min ?? 0) || 0;
+        const position = (row as any).position ?? null;
+        const existing = totalsMap.get(pid) ?? { points: 0, goals: 0, assists: 0, penMin: 0, position };
+        totalsMap.set(pid, {
+          points: existing.points + normalized,
+          goals: existing.goals + goals,
+          assists: existing.assists + assists,
+          penMin: existing.penMin + penMin,
+          position: existing.position ?? position,
+        });
       });
+      console.log(`${LOG_PREFIX} Aggregated players`, totalsMap.size);
+      console.log(
+        `${LOG_PREFIX} Sample totals`,
+        Array.from(totalsMap.entries())
+          .slice(0, 3)
+          .map(([pid, v]) => ({ pid, ...v })),
+      );
 
       const displayRows: PlayerPointsRow[] = roster.map(row => {
         const player = playersMap.get(row.player_id);
-        const basePoints = pointsMap.get(row.player_id) ?? 0;
-        if (!pointsMap.has(row.player_id)) {
+        const totals = totalsMap.get(row.player_id);
+        const basePoints = totals?.points ?? 0;
+        if (!totalsMap.has(row.player_id)) {
           console.log(
             `${LOG_PREFIX} no points row for player_id=${row.player_id} defaulting to 0`
           );
@@ -198,7 +217,7 @@ export default function MyPointsScreen() {
         return {
           playerId: row.player_id,
           name: player?.name ?? 'Unknown player',
-          position: player?.position ?? null,
+          position: player?.position ?? totals?.position ?? null,
           isCaptain,
           basePoints,
           displayPoints,
@@ -251,8 +270,8 @@ export default function MyPointsScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{teamName ?? 'My Points'}</Text>
-      <Text style={styles.totalText}>Total: {totalPoints.toFixed(2)}</Text>
-      {matchLabel ? <Text style={styles.subheader}>Match: {matchLabel}</Text> : null}
+      <Text style={styles.totalText}>Season Total: {totalPoints.toFixed(2)}</Text>
+      <Text style={styles.subheader}>Season: 2025-26</Text>
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
       <FlatList
         data={rows}

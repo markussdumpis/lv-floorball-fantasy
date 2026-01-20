@@ -40,6 +40,18 @@ type ParsedGoal = {
   detailsText: string;
 };
 
+type ParsedPenalty = {
+  timeText: string | null;
+  playerPart: string | null;
+  playerNormalized: string | null;
+  minutes: number | null;
+  teamSide: 'home' | 'away' | null;
+  period: number | null;
+  detailsText: string;
+  servedByNumber: string | null;
+  servedByName: string | null;
+};
+
 type InsertableEvent = {
   match_id: string;
   ts_seconds: number | null;
@@ -47,8 +59,8 @@ type InsertableEvent = {
   team_id: string;
   player_id: string;
   assist_id: string | null;
-  event_type: 'goal';
-  value: null;
+  event_type: 'goal' | 'minor_2' | 'double_minor' | 'misconduct_10' | 'red_card';
+  value: number | null;
   raw: unknown;
   created_at: string;
 };
@@ -61,11 +73,11 @@ function normalizeWhitespace(value: string | null | undefined): string {
 
 function stripJerseyNumber(value: string | null | undefined): string {
   const cleaned = normalizeWhitespace(value);
-  return cleaned.replace(/#\d+\s*/g, '').trim();
+  return cleaned.replace(/(?:#|nr\.?\s*)\d+\s*/gi, '').trim();
 }
 
 function extractJerseyNumber(value: string | null | undefined): string | null {
-  const match = (value ?? '').match(/#(\d{1,3})/);
+  const match = (value ?? '').match(/(?:#|nr\.?\s*)(\d{1,3})/i);
   return match ? match[1] : null;
 }
 
@@ -108,14 +120,25 @@ function getArgValue(flag: string): string | null {
   return null;
 }
 
-function parseArgs(): { matchId: string } {
+function parseArgs(): { matchId: string | null; allFinished: boolean } {
   const matchId = getArgValue('--matchId');
-  if (!matchId) {
-    console.error('Usage: npm run ingest:match-events -- --matchId <uuid>');
+  const allFinished = process.argv
+    .slice(2)
+    .some((arg) => arg === '--all-finished' || arg.startsWith('--all-finished='));
+
+  if ((matchId && allFinished) || (!matchId && !allFinished)) {
+    console.error('Usage: npm run ingest:match-events -- --matchId <uuid> | --all-finished');
     process.exit(1);
   }
-  console.log(`${LOG_PREFIX} matchId:`, matchId);
-  return { matchId };
+
+  if (matchId) {
+    console.log(`${LOG_PREFIX} matchId:`, matchId);
+  }
+  if (allFinished) {
+    console.log(`${LOG_PREFIX} all-finished mode enabled`);
+  }
+
+  return { matchId, allFinished };
 }
 
 function buildProtocolUrl(externalId: string, season: string | null): string {
@@ -134,9 +157,48 @@ function parseTimeToSeconds(raw: string | null): number | null {
   return minutes * 60 + seconds;
 }
 
-function parseGoalsFromHtml(html: string): { goals: ParsedGoal[]; rowsScanned: number } {
+function parsePenaltyDetail(detailText: string): {
+  playerPart: string | null;
+  minutesTotal: number | null;
+  reason: string | null;
+  servedBy: { number?: string; name?: string } | null;
+} {
+  const trimmed = normalizeWhitespace(detailText);
+  const firstParenIdx = trimmed.indexOf('(');
+  const playerPart = firstParenIdx === -1 ? trimmed || null : trimmed.slice(0, firstParenIdx).trim() || null;
+
+  const insideMatch = trimmed.slice(firstParenIdx === -1 ? trimmed.length : firstParenIdx).match(/\(([^)]*)\)/);
+  const inside = insideMatch?.[1] ?? '';
+
+  let minutesTotal: number | null = null;
+  if (/24\s*min/i.test(inside)) {
+    minutesTotal = 24;
+  } else if (/12\s*min/i.test(inside)) {
+    minutesTotal = 12;
+  } else if (/2\s*\+\s*2/i.test(inside) || /4\s*min/i.test(inside)) {
+    minutesTotal = 4;
+  } else if (/2\s*min/i.test(inside)) {
+    minutesTotal = 2;
+  }
+
+  const reason =
+    inside.includes(';') && inside.split(';')[1] ? stripParentheses(inside.split(';').slice(1).join(';')).trim() : null;
+
+  let servedBy: { number?: string; name?: string } | null = null;
+  const servedByMatch = trimmed.match(/sodu izcieš[^0-9]*?(?:nr\.?\s*)?(\d{1,3})?\s*([^)]+)/i);
+  if (servedByMatch) {
+    const servedNumber = servedByMatch[1] ? servedByMatch[1].trim() : undefined;
+    const servedName = servedByMatch[2] ? normalizeWhitespace(stripJersey(servedByMatch[2])) : undefined;
+    servedBy = { number: servedNumber, name: servedName };
+  }
+
+  return { playerPart, minutesTotal, reason: reason || null, servedBy };
+}
+
+function parseGoalsFromHtml(html: string): { goals: ParsedGoal[]; penalties: ParsedPenalty[]; rowsScanned: number } {
   const $ = loadHtml(html);
   const goals: ParsedGoal[] = [];
+  const penalties: ParsedPenalty[] = [];
   let rowsScanned = 0;
   let currentPeriod = 1;
 
@@ -153,16 +215,33 @@ function parseGoalsFromHtml(html: string): { goals: ParsedGoal[]; rowsScanned: n
     }
 
     const typeText = cleanText($(cells[1]).text());
-    if (!/^vārti/i.test(typeText)) {
-      return;
-    }
-
     const className = ($(cells[0]).attr('class') ?? '').toLowerCase();
     const teamSide = className.includes('maj') ? 'home' : className.includes('vie') ? 'away' : null;
 
     const timeText = cleanText($(cells[0]).text());
     const scoreText = cleanText($(cells[2]).text());
     const detailsText = cleanText($(cells[3]).text());
+
+    if (/sods/i.test(typeText)) {
+      const parsed = parsePenaltyDetail(detailsText);
+      const playerNormalized = parsed.playerPart ? normalizeName(parsed.playerPart) : null;
+      penalties.push({
+        timeText,
+        playerPart: parsed.playerPart,
+        playerNormalized,
+        minutes: parsed.minutesTotal,
+        teamSide,
+        period: currentPeriod,
+        detailsText,
+        servedByName: parsed.servedBy?.name ?? null,
+        servedByNumber: parsed.servedBy?.number ?? null,
+      });
+      return;
+    }
+
+    if (!/^vārti/i.test(typeText)) {
+      return;
+    }
 
     const scorerRaw = detailsText.split('(')[0] ?? '';
     const scorerNormalized = scorerRaw ? normalizeName(scorerRaw) : null;
@@ -186,7 +265,7 @@ function parseGoalsFromHtml(html: string): { goals: ParsedGoal[]; rowsScanned: n
     });
   });
 
-  return { goals, rowsScanned };
+  return { goals, penalties, rowsScanned };
 }
 
 async function fetchMatch(client: ReturnType<typeof createSupabase>['client'], matchId: string) {
@@ -230,6 +309,44 @@ async function fetchPlayers(
   return (data ?? []) as PlayerRow[];
 }
 
+async function fetchCurrentSeason(client: SupabaseClient): Promise<string> {
+  const { data, error } = await client
+    .from('matches')
+    .select('season')
+    .not('season', 'is', null)
+    .order('season', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.season) {
+    throw new Error('Unable to determine current season');
+  }
+
+  return data.season as string;
+}
+
+async function fetchFinishedMatches(client: SupabaseClient, season: string): Promise<MatchRow[]> {
+  const { data, error } = await client
+    .from('matches')
+    .select('id, external_id, home_team, away_team, date, season')
+    .eq('status', 'finished')
+    .eq('season', season)
+    .not('external_id', 'is', null)
+    .neq('external_id', '')
+    .not('external_id', 'like', 'vv:%')
+    .order('date', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []) as MatchRow[];
+}
+
 function resolveTeamId(teamName: string | null, teams: TeamRow[], homeId: string, awayId: string): string | null {
   if (!teamName) return null;
   const norm = normalize(teamName);
@@ -271,6 +388,11 @@ async function ensureStubPlayer(
   canonicalName: string,
   normalizedName: string,
   playerIndex: Map<string, string>,
+  logLabel:
+    | 'CREATED_STUB_PLAYER'
+    | 'CREATED_STUB_PLAYER_ASSIST'
+    | 'CREATED_STUB_PLAYER_PENALTY' = 'CREATED_STUB_PLAYER',
+  reason: 'protocol_unmapped' | 'protocol_unmapped_assist' | 'protocol_unmapped_penalty' = 'protocol_unmapped',
 ): Promise<string | null> {
   const existing = playerIndex.get(`${teamId}:${normalizedName}`);
   if (existing) {
@@ -296,20 +418,34 @@ async function ensureStubPlayer(
   }
 
   playerIndex.set(`${teamId}:${normalizedName}`, data.id);
-  console.log(`${LOG_PREFIX} CREATED_STUB_PLAYER`, {
+  console.log(`${LOG_PREFIX} ${logLabel}`, {
     team_id: teamId,
     canonicalName,
-    reason: 'protocol_unmapped',
+    reason,
   });
   return data.id;
 }
 
-async function main(): Promise<void> {
-  const { matchId } = parseArgs();
-  const env = getEnv();
-  const supa = createSupabase(env);
+async function ingestSingleMatch(
+  supa: ReturnType<typeof createSupabase>,
+  env: ReturnType<typeof getEnv>,
+  match: MatchRow,
+): Promise<{
+  eventsInserted: number;
+  stubPlayersCreatedScorer: number;
+  stubPlayersCreatedAssist: number;
+  stubPlayersCreatedPenalty: number;
+  unmappedAssistCount: number;
+  unmappedScorers: number;
+  unmappedPenaltyPlayers: number;
+  penaltiesInserted: number;
+  misconductsDetected: number;
+  redCardsDetected: number;
+}> {
+  if (!match.external_id || match.external_id === '' || match.external_id.startsWith('vv:')) {
+    throw new Error('Match missing valid protocol slug');
+  }
 
-  const match = await fetchMatch(supa.client, matchId);
   const protocolUrl = buildProtocolUrl(match.external_id, match.season);
   console.log(`${LOG_PREFIX} Protocol URL: ${protocolUrl}`);
 
@@ -330,9 +466,10 @@ async function main(): Promise<void> {
   }
   console.log(`${LOG_PREFIX} Protocol preview (500 chars): ${html.slice(0, 500)}`);
 
-  const { goals: parsedGoals, rowsScanned } = parseGoalsFromHtml(html);
+  const { goals: parsedGoals, penalties: parsedPenalties, rowsScanned } = parseGoalsFromHtml(html);
   console.log(`${LOG_PREFIX} Rows scanned: ${rowsScanned}`);
   console.log(`${LOG_PREFIX} Goals parsed: ${parsedGoals.length}`);
+  console.log(`${LOG_PREFIX} Penalties parsed: ${parsedPenalties.length}`);
 
   const teams = await fetchTeams(supa.client, [match.home_team, match.away_team]);
   const players = await fetchPlayers(supa.client, [match.home_team, match.away_team]);
@@ -340,7 +477,13 @@ async function main(): Promise<void> {
 
   const unmappedPlayers = new Set<string>();
   let unmappedAssistCount = 0;
-  let stubCreatedCount = 0;
+  let stubCreatedScorerCount = 0;
+  let stubCreatedAssistCount = 0;
+  let stubCreatedPenaltyCount = 0;
+  let unmappedPenaltyPlayers = 0;
+  let penaltiesInserted = 0;
+  let misconductsDetected = 0;
+  let redCardsDetected = 0;
   const events: InsertableEvent[] = [];
 
   for (const goal of parsedGoals) {
@@ -368,7 +511,7 @@ async function main(): Promise<void> {
           : null;
 
       if (scorerId) {
-        stubCreatedCount += 1;
+        stubCreatedScorerCount += 1;
       } else {
         unmappedPlayers.add(`${teamId}:${goal.scorerNormalized ?? 'unknown'}`);
         console.warn(`${LOG_PREFIX} UNMAPPED_PLAYER scorer`, {
@@ -386,18 +529,41 @@ async function main(): Promise<void> {
     if (goal.assistNormalized) {
       assistId = mapPlayerId(goal.assistNormalized, teamId, playerIndex);
       if (!assistId) {
-        unmappedAssistCount += 1;
+        const jersey = extractJerseyNumber(goal.assistRaw);
+        const cleanName = normalizeWhitespace(stripJerseyNumber(goal.assistRaw));
+        const canonicalName = cleanName ? (jersey ? `${cleanName} #${jersey}` : cleanName) : '';
+        const normalizedCanonical = normalizeName(canonicalName);
+
         const candidates = Array.from(playerIndex.entries())
           .filter(([key]) => key.startsWith(`${teamId}:`))
           .map(([key]) => key.split(':')[1])
           .slice(0, 5);
-        console.warn(`${LOG_PREFIX} UNMAPPED_ASSIST`, {
-          team_id: teamId,
-          raw: goal.assistRaw,
-          normalized: goal.assistNormalized,
-          raw_row: goal.detailsText,
-          candidates,
-        });
+
+        if (canonicalName && normalizedCanonical) {
+          assistId = await ensureStubPlayer(
+            supa.client,
+            teamId,
+            canonicalName,
+            normalizedCanonical,
+            playerIndex,
+            'CREATED_STUB_PLAYER_ASSIST',
+            'protocol_unmapped_assist',
+          );
+          if (assistId) {
+            stubCreatedAssistCount += 1;
+          }
+        }
+
+        if (!assistId) {
+          unmappedAssistCount += 1;
+          console.warn(`${LOG_PREFIX} UNMAPPED_ASSIST`, {
+            team_id: teamId,
+            raw: goal.assistRaw,
+            normalized: goal.assistNormalized,
+            raw_row: goal.detailsText,
+            candidates,
+          });
+        }
       }
     }
 
@@ -422,9 +588,132 @@ async function main(): Promise<void> {
     });
   }
 
-  console.log(`${LOG_PREFIX} Goals mapped to events: ${events.length}`);
+  for (const pen of parsedPenalties) {
+    const teamId = pen.teamSide === 'home' ? match.home_team : pen.teamSide === 'away' ? match.away_team : null;
+    if (!teamId) {
+      console.warn(`${LOG_PREFIX} Unable to resolve team for penalty row`, pen.detailsText);
+      continue;
+    }
+
+    if (!pen.playerPart) {
+      console.warn(`${LOG_PREFIX} UNMAPPED_PENALTY_PLAYER`, {
+        team_id: teamId,
+        playerPart: pen.playerPart,
+        normalizedPlayerPart: pen.playerNormalized,
+        minutesTotal: pen.minutes,
+        raw_row: pen.detailsText,
+      });
+      continue;
+    }
+
+    const lowerPart = pen.playerPart.toLowerCase();
+    if (lowerPart.includes('min') || lowerPart.includes(';')) {
+      console.warn(`${LOG_PREFIX} PARSE_BUG penalty player looks like reason`, {
+        team_id: teamId,
+        playerPart: pen.playerPart,
+        normalizedPlayerPart: pen.playerNormalized,
+        raw_row: pen.detailsText,
+      });
+      continue;
+    }
+
+    if (!pen.minutes) {
+      console.warn(`${LOG_PREFIX} UNKNOWN_PENALTY minutes missing`, pen.detailsText);
+      continue;
+    }
+
+    let playerId = mapPlayerId(pen.playerNormalized, teamId, playerIndex);
+    if (!playerId) {
+      const jersey = extractJerseyNumber(pen.playerPart);
+      const cleanName = normalizeWhitespace(stripJerseyNumber(pen.playerPart));
+      const canonicalName = cleanName ? (jersey ? `${cleanName} #${jersey}` : cleanName) : '';
+      const normalizedCanonical = normalizeName(canonicalName);
+
+      const candidates = Array.from(playerIndex.entries())
+        .filter(([key]) => key.startsWith(`${teamId}:`))
+        .map(([key]) => key.split(':')[1])
+        .slice(0, 5);
+
+      playerId =
+        canonicalName && normalizedCanonical
+          ? await ensureStubPlayer(
+              supa.client,
+              teamId,
+              canonicalName,
+              normalizedCanonical,
+              playerIndex,
+              'CREATED_STUB_PLAYER_PENALTY',
+              'protocol_unmapped_penalty',
+            )
+          : null;
+
+      if (playerId) {
+        stubCreatedPenaltyCount += 1;
+      } else {
+        unmappedPenaltyPlayers += 1;
+        console.warn(`${LOG_PREFIX} UNMAPPED_PENALTY_PLAYER`, {
+          team_id: teamId,
+          playerPart: pen.playerPart,
+          normalizedPlayerPart: pen.playerNormalized,
+          minutesTotal: pen.minutes,
+          raw_row: pen.detailsText,
+          candidates,
+        });
+        continue;
+      }
+    }
+
+    const penTextLower = pen.detailsText.toLowerCase();
+    const eventsForPenalty: { event_type: InsertableEvent['event_type']; value: number }[] = [];
+
+    if (penTextLower.includes('spēles sods') || penTextLower.includes('speles sods') || pen.minutes >= 20) {
+      eventsForPenalty.push({ event_type: 'red_card', value: pen.minutes });
+      redCardsDetected += 1;
+    } else if (pen.minutes === 12 && /sodu izcieš/i.test(pen.detailsText)) {
+      eventsForPenalty.push({ event_type: 'minor_2', value: 2 });
+      eventsForPenalty.push({ event_type: 'misconduct_10', value: 10 });
+      misconductsDetected += 1;
+    } else if (pen.minutes === 2) {
+      eventsForPenalty.push({ event_type: 'minor_2', value: 2 });
+    } else if (pen.minutes === 4) {
+      eventsForPenalty.push({ event_type: 'double_minor', value: 4 });
+    } else {
+      console.warn(`${LOG_PREFIX} UNKNOWN_PENALTY`, pen.detailsText);
+      continue;
+    }
+
+    for (const evt of eventsForPenalty) {
+      events.push({
+        match_id: match.id,
+        ts_seconds: parseTimeToSeconds(pen.timeText),
+        period: pen.period,
+        team_id: teamId,
+        player_id: playerId,
+        assist_id: null,
+        event_type: evt.event_type,
+        value: evt.value,
+        raw: {
+          time: pen.timeText,
+          type: 'Sods',
+          detailsText: pen.detailsText,
+          minutes: pen.minutes,
+          served_by_number: pen.servedByNumber,
+          served_by_name: pen.servedByName,
+          player_raw: pen.playerPart,
+        },
+        created_at: new Date().toISOString(),
+      });
+      penaltiesInserted += 1;
+    }
+  }
+
+  console.log(`${LOG_PREFIX} Goals mapped to events: ${events.filter((e) => e.event_type === 'goal').length}`);
+  console.log(`${LOG_PREFIX} Penalties detected: ${parsedPenalties.length}`);
+  console.log(`${LOG_PREFIX} Penalties inserted: ${penaltiesInserted}`);
+  console.log(`${LOG_PREFIX} Misconducts detected: ${misconductsDetected}`);
+  console.log(`${LOG_PREFIX} Red cards detected: ${redCardsDetected}`);
   console.log(
-    `${LOG_PREFIX} Summary: rows_scanned=${rowsScanned}, goals_detected=${parsedGoals.length}, goals_insertable=${events.length}, unmapped_scorers=${unmappedPlayers.size}, unmapped_assists=${unmappedAssistCount}, stub_players_created=${stubCreatedCount}`,
+    `${LOG_PREFIX} Summary: rows_scanned=${rowsScanned}, goals_detected=${parsedGoals.length}, penalties_detected=${parsedPenalties.length}, events_insertable=${events.length}, unmapped_scorers=${unmappedPlayers.size}, unmapped_assists=${unmappedAssistCount}, unmapped_penalties=${unmappedPenaltyPlayers}, stub_players_created_scorer=${stubCreatedScorerCount}, stub_players_created_assist=${stubCreatedAssistCount}, stub_players_created_penalty=${stubCreatedPenaltyCount}`,
   );
 
   console.log(`${LOG_PREFIX} Deleting existing events for match ${match.id}`);
@@ -438,7 +727,18 @@ async function main(): Promise<void> {
     if (unmappedPlayers.size > 0) {
       console.warn(`${LOG_PREFIX} Unmapped players: ${Array.from(unmappedPlayers).join(', ')}`);
     }
-    return;
+    return {
+      eventsInserted: 0,
+      stubPlayersCreatedScorer: stubCreatedScorerCount,
+      stubPlayersCreatedAssist: stubCreatedAssistCount,
+      stubPlayersCreatedPenalty: stubCreatedPenaltyCount,
+      unmappedAssistCount,
+      unmappedScorers: unmappedPlayers.size,
+      unmappedPenaltyPlayers,
+      penaltiesInserted,
+      misconductsDetected,
+      redCardsDetected,
+    };
   }
 
   const { error: insertError, count } = await supa.client
@@ -449,10 +749,122 @@ async function main(): Promise<void> {
     throw insertError;
   }
 
-  console.log(`${LOG_PREFIX} Inserted events: ${count ?? events.length}`);
+  const inserted = count ?? events.length;
+
+  console.log(`${LOG_PREFIX} Inserted events: ${inserted}`);
   if (unmappedPlayers.size > 0) {
     console.warn(`${LOG_PREFIX} Unmapped players: ${Array.from(unmappedPlayers).join(', ')}`);
   }
+
+  return {
+    eventsInserted: inserted,
+    stubPlayersCreatedScorer: stubCreatedScorerCount,
+    stubPlayersCreatedAssist: stubCreatedAssistCount,
+    stubPlayersCreatedPenalty: stubCreatedPenaltyCount,
+    unmappedAssistCount,
+    unmappedScorers: unmappedPlayers.size,
+    unmappedPenaltyPlayers,
+    penaltiesInserted,
+    misconductsDetected,
+    redCardsDetected,
+  };
+}
+
+async function main(): Promise<void> {
+  const { matchId, allFinished } = parseArgs();
+  const env = getEnv();
+  const supa = createSupabase(env);
+
+  if (allFinished) {
+    const currentSeason = await fetchCurrentSeason(supa.client);
+    console.log(`${LOG_PREFIX} Current season: ${currentSeason}`);
+    const matches = await fetchFinishedMatches(supa.client, currentSeason);
+    const totalConsidered = matches.length;
+    console.log(`${LOG_PREFIX} Finished matches to ingest: ${totalConsidered}`);
+
+    let succeeded = 0;
+    let failed = 0;
+    let skipped = 0;
+    let totalEventsInserted = 0;
+    let totalStubPlayersScorer = 0;
+    let totalStubPlayersAssist = 0;
+    let totalStubPlayersPenalty = 0;
+    let totalUnmappedAssists = 0;
+    let totalUnmappedPenalties = 0;
+    let totalPenaltiesInserted = 0;
+    let totalMisconducts = 0;
+    let totalRedCards = 0;
+
+    for (let i = 0; i < matches.length; i += 1) {
+      const match = matches[i];
+      console.log(
+        `${LOG_PREFIX} [${i + 1}/${totalConsidered}] matchId=${match.id} external_id=${match.external_id} date=${match.date ?? 'unknown'}`,
+      );
+
+      if (!match.external_id || match.external_id === '' || match.external_id.startsWith('vv:')) {
+        console.warn(`${LOG_PREFIX} SKIP matchId=${match.id} reason=invalid_protocol_slug`);
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        const {
+          eventsInserted,
+          stubPlayersCreatedScorer,
+          stubPlayersCreatedAssist,
+          unmappedAssistCount,
+          stubPlayersCreatedPenalty,
+          unmappedPenaltyPlayers,
+          penaltiesInserted,
+          misconductsDetected,
+          redCardsDetected,
+        } = await ingestSingleMatch(
+          supa,
+          env,
+          match,
+        );
+        succeeded += 1;
+        totalEventsInserted += eventsInserted;
+        totalStubPlayersScorer += stubPlayersCreatedScorer;
+        totalStubPlayersAssist += stubPlayersCreatedAssist;
+        totalUnmappedAssists += unmappedAssistCount;
+        totalStubPlayersPenalty += stubPlayersCreatedPenalty;
+        totalUnmappedPenalties += unmappedPenaltyPlayers;
+        totalPenaltiesInserted += penaltiesInserted;
+        totalMisconducts += misconductsDetected;
+        totalRedCards += redCardsDetected;
+      } catch (error) {
+        failed += 1;
+        const reason = (error as Error)?.message ?? 'unknown';
+        console.error(`${LOG_PREFIX} MATCH_FAILED matchId=${match.id} reason=${reason}`, error);
+      }
+    }
+
+    console.log(
+      `${LOG_PREFIX} Batch summary: total_matches_considered=${totalConsidered}, succeeded=${succeeded}, failed=${failed}, skipped=${skipped}, events_inserted=${totalEventsInserted}, penalties_inserted=${totalPenaltiesInserted}, misconducts_detected=${totalMisconducts}, red_cards_detected=${totalRedCards}, stub_players_created_scorer=${totalStubPlayersScorer}, stub_players_created_assist=${totalStubPlayersAssist}, stub_players_created_penalty=${totalStubPlayersPenalty}, unmapped_assists=${totalUnmappedAssists}, unmapped_penalties=${totalUnmappedPenalties}`,
+    );
+    return;
+  }
+
+  if (!matchId) {
+    throw new Error('matchId is required in single-match mode');
+  }
+
+  const match = await fetchMatch(supa.client, matchId);
+  const {
+    eventsInserted,
+    stubPlayersCreatedScorer,
+    stubPlayersCreatedAssist,
+    unmappedAssistCount,
+    stubPlayersCreatedPenalty,
+    unmappedPenaltyPlayers,
+    penaltiesInserted,
+    misconductsDetected,
+    redCardsDetected,
+  } = await ingestSingleMatch(supa, env, match);
+  console.log(
+    `${LOG_PREFIX} Summary: total_matches_considered=1, succeeded=1, failed=0, skipped=0, events_inserted=${eventsInserted}, penalties_inserted=${penaltiesInserted}, misconducts_detected=${misconductsDetected}, red_cards_detected=${redCardsDetected}, stub_players_created_scorer=${stubPlayersCreatedScorer}, stub_players_created_assist=${stubPlayersCreatedAssist}, stub_players_created_penalty=${stubPlayersCreatedPenalty}, unmapped_assists=${unmappedAssistCount}, unmapped_penalties=${unmappedPenaltyPlayers}`,
+  );
 }
 
 main().catch((error) => {

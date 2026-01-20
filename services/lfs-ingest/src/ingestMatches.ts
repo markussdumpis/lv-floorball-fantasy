@@ -1,5 +1,4 @@
 import { URL } from 'node:url';
-import { writeFile } from 'node:fs/promises';
 import { getEnv } from './env.js';
 import { fetchWithRetry } from './http.js';
 import { cleanText, loadHtml } from './html.js';
@@ -31,6 +30,8 @@ type ParsedMatch = {
 type TeamRow = { id: string; code: string | null; name: string | null };
 
 const LOG_PREFIX = '[ingest:matches]';
+const DEFAULT_PAGE_LENGTH = 100;
+const DEFAULT_SPELU_VEIDS = '00';
 
 function normalize(value: string | null | undefined): string {
   return (value ?? '')
@@ -170,11 +171,36 @@ async function loadTeams(client: SupabaseClient): Promise<TeamRow[]> {
   return data ?? [];
 }
 
+async function findExistingScheduledFixture(
+  client: SupabaseClient,
+  params: { season: string; date: string; home_team: string; away_team: string },
+): Promise<{ id: string; external_id: string | null } | null> {
+  const { data, error } = await client
+    .from('matches')
+    .select('id, external_id')
+    .eq('season', params.season)
+    .eq('date', params.date)
+    .eq('home_team', params.home_team)
+    .eq('away_team', params.away_team)
+    .eq('status', 'scheduled')
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  return data as { id: string; external_id: string | null };
+}
+
 function buildParsedMatches(rows: CalendarRow[]): ParsedMatch[] {
   return rows.map((row) => {
     const protocolId = row.protocolId;
     const score = parseScore(row.scoreText);
-    const status = score ? 'finished' : 'scheduled';
+    const status = score && protocolId ? 'finished' : 'scheduled';
     return {
       date: row.date,
       homeName: row.homeName,
@@ -196,12 +222,21 @@ async function upsertMatches(
   league: string,
   seasonCode: string,
   teams: TeamRow[],
-): Promise<{ upserted: number; skipped: number }> {
+): Promise<{
+  upserted: number;
+  skipped: number;
+  scheduledProcessed: number;
+  scheduledSkipped: number;
+  scheduledInsertedOrUpdated: number;
+}> {
   let skipped = 0;
   const unmappedTeams: Set<string> = new Set();
   const rowsToUpsert: Array<Record<string, unknown>> = [];
+  let scheduledProcessed = 0;
+  let scheduledSkipped = 0;
+  let scheduledInsertedOrUpdated = 0;
 
-  matches.forEach((match) => {
+  for (const match of matches) {
     const home = mapTeamId(match.homeName, teams);
     const away = mapTeamId(match.awayName, teams);
 
@@ -213,7 +248,47 @@ async function upsertMatches(
       return;
     }
 
-    const fallbackExternalId = `${league}:${seasonCode}:${match.date.toISOString().split('T')[0]}:${home.code}:${away.code}`;
+    if (match.status === 'scheduled') {
+      scheduledProcessed += 1;
+      const existingScheduled = await findExistingScheduledFixture(client, {
+        season,
+        date: match.date.toISOString(),
+        home_team: home.id,
+        away_team: away.id,
+      });
+
+      // If an existing scheduled fixture exists, update non-identity fields and skip external_id changes.
+      if (existingScheduled) {
+        scheduledSkipped += 1;
+        const updatePayload = {
+          status: match.status,
+          venue: match.venue,
+          home_score: match.homeScore,
+          away_score: match.awayScore,
+        };
+        const { error } = await client.from('matches').update(updatePayload).eq('id', existingScheduled.id);
+        if (error) {
+          console.warn(`${LOG_PREFIX} Failed to update existing scheduled fixture`, {
+            match: match.date.toISOString(),
+            home: home.code,
+            away: away.code,
+            error,
+          });
+        }
+        console.log(`${LOG_PREFIX} scheduled fixture exists, skipping duplicate external_id`, {
+          date: match.date.toISOString(),
+          home: home.code,
+          away: away.code,
+          existing_external_id: existingScheduled.external_id,
+          incoming_external_id: match.protocolId,
+        });
+        continue;
+      }
+
+      scheduledInsertedOrUpdated += 1;
+    }
+
+    const fallbackExternalId = `${match.date.toISOString()}|${normalize(match.homeName)}|${normalize(match.awayName)}|${seasonCode}`;
     const externalId = match.protocolId ?? fallbackExternalId;
 
     rowsToUpsert.push({
@@ -227,7 +302,7 @@ async function upsertMatches(
       home_score: match.homeScore,
       away_score: match.awayScore,
     });
-  });
+  }
 
   console.log(`${LOG_PREFIX} Parsed ${matches.length} matches; upserting ${rowsToUpsert.length}; skipped ${skipped}`);
   if (unmappedTeams.size > 0) {
@@ -248,7 +323,127 @@ async function upsertMatches(
   }
 
   console.log(`${LOG_PREFIX} Upserted ${count ?? rowsToUpsert.length} rows`);
-  return { upserted: count ?? rowsToUpsert.length, skipped };
+  return {
+    upserted: count ?? rowsToUpsert.length,
+    skipped,
+    scheduledProcessed,
+    scheduledSkipped,
+    scheduledInsertedOrUpdated,
+  };
+}
+
+async function fetchCalendarPages(
+  env: ReturnType<typeof getEnv>,
+  ajaxUrl: string,
+  league: string,
+  seasonCode: string,
+  monthFilter: string,
+  speluVeids: string,
+): Promise<{ aaData: unknown[]; totalRecords: number }> {
+  let start = 0;
+  let sEcho = 1;
+  let totalRecords = Number.POSITIVE_INFINITY;
+  const acc: unknown[] = [];
+  let page = 0;
+
+  while (start < totalRecords) {
+    page += 1;
+    console.log(`${LOG_PREFIX} Fetching page`, { monthFilter, start, length: DEFAULT_PAGE_LENGTH, sEcho });
+    const params = new URLSearchParams({
+      url: 'https://www.floorball.lv/lv',
+      menu: 'chempionats',
+      filtrs_grupa: league,
+      filtrs_sezona: seasonCode,
+      filtrs_spelu_veids: speluVeids,
+      filtrs_menesis: monthFilter,
+      filtrs_komanda: '00',
+      filtrs_majas_viesi: '00',
+      iDisplayStart: String(start),
+      iDisplayLength: String(DEFAULT_PAGE_LENGTH),
+      sEcho: String(sEcho),
+    });
+
+    const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'user-agent': env.userAgent,
+        cookie: env.cookie,
+      },
+      body: params.toString(),
+    });
+    const contentType = headers.get('content-type') ?? 'unknown';
+    console.log(`${LOG_PREFIX} Response status ${status}, content-type ${contentType}`);
+
+    let payload: any;
+    try {
+      payload = JSON.parse(body);
+    } catch (err) {
+      console.error(`${LOG_PREFIX} Failed to parse JSON`, err);
+      break;
+    }
+
+    const pageTotal = Number(payload?.iTotalRecords ?? payload?.iTotalDisplayRecords ?? 0);
+    if (!Number.isFinite(totalRecords) || totalRecords === Number.POSITIVE_INFINITY) {
+      totalRecords = pageTotal;
+      console.log(`${LOG_PREFIX} totalRecords from first page: ${totalRecords}`);
+    }
+
+    const pageData = Array.isArray(payload?.aaData) ? payload.aaData : [];
+    const pageLength = pageData.length;
+    console.log(`${LOG_PREFIX} Page ${page} aaData length: ${pageLength}`);
+
+    acc.push(...pageData);
+
+    if (pageLength === 0) {
+      break;
+    }
+
+    start += DEFAULT_PAGE_LENGTH;
+    sEcho += 1;
+    if (start >= totalRecords) {
+      break;
+    }
+  }
+
+  return { aaData: acc, totalRecords: Number.isFinite(totalRecords) ? totalRecords : acc.length };
+}
+
+async function fetchMonthOptions(params: {
+  env: ReturnType<typeof getEnv>;
+  seasonCode: string;
+  league: string;
+  speluVeids: string;
+}): Promise<string[]> {
+  const { env, seasonCode, league, speluVeids } = params;
+  const url = 'https://www.floorball.lv/ajax/ajax_chempionats_kalendars_meneshi.php';
+  const bodyParams = new URLSearchParams({
+    sezona: seasonCode,
+    grupa: league,
+    filtrs_spelu_veids: speluVeids,
+  });
+
+  console.log(`${LOG_PREFIX} Fetching month options`, { url, seasonCode, league, speluVeids });
+  const { body } = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      'user-agent': env.userAgent,
+      cookie: env.cookie,
+    },
+    body: bodyParams.toString(),
+  });
+
+  const $ = loadHtml(body);
+  const values: string[] = [];
+  $('option').each((_, el) => {
+    const val = ($(el).attr('value') ?? '').trim();
+    if (!val || val === '00') return;
+    values.push(val);
+  });
+
+  console.log(`${LOG_PREFIX} Month options found (${values.length}): ${values.join(', ')}`);
+  return values;
 }
 
 async function main(): Promise<void> {
@@ -257,70 +452,61 @@ async function main(): Promise<void> {
   const supa = createSupabase(env);
   const ajaxUrl = 'https://www.floorball.lv/ajax/ajax_chempionats_kalendars.php';
   const seasonCode = '34';
+  const speluVeids = DEFAULT_SPELU_VEIDS;
 
-  const params = new URLSearchParams({
-    url: 'https://www.floorball.lv/lv',
-    menu: 'chempionats',
-    filtrs_grupa: league,
-    filtrs_sezona: seasonCode,
-    filtrs_spelu_veids: '00',
-    filtrs_menesis: '00',
-    filtrs_komanda: '00',
-    filtrs_majas_viesi: '00',
-    iDisplayStart: '0',
-    iDisplayLength: '5000',
-    sEcho: '1',
-  });
+  const monthOptions = await fetchMonthOptions({ env, seasonCode, league, speluVeids });
+  const monthsToFetch = monthOptions.length ? monthOptions : ['00'];
+  console.log(`${LOG_PREFIX} Months to fetch (${monthsToFetch.length}): ${monthsToFetch.join(', ')}`);
 
-  console.log(`${LOG_PREFIX} Fetching calendar AJAX`, { ajaxUrl, league, seasonCode });
-  const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-      'user-agent': env.userAgent,
-      cookie: env.cookie,
-    },
-    body: params.toString(),
-  });
-  const contentType = headers.get('content-type') ?? 'unknown';
-  console.log(`${LOG_PREFIX} Response status ${status}, content-type ${contentType}`);
-  console.log(`${LOG_PREFIX} Body preview (1000 chars): ${body.slice(0, 1000)}`);
+  const allCalendarRows: CalendarRow[] = [];
+  let combinedAaDataCount = 0;
+  let totalNoProtocolCount = 0;
 
-  const dumpPath = '/tmp/lfs-calendar.html';
-  try {
-    await writeFile(dumpPath, body, 'utf8');
-    console.log(`${LOG_PREFIX} Saved calendar response to ${dumpPath}`);
-  } catch (err) {
-    console.warn(`${LOG_PREFIX} Failed to save response to ${dumpPath}:`, err);
+  for (const monthFilter of monthsToFetch) {
+    console.log(`${LOG_PREFIX} Fetching calendar AJAX`, { ajaxUrl, league, seasonCode, monthFilter });
+    const result = await fetchCalendarPages(env, ajaxUrl, league, seasonCode, monthFilter, speluVeids);
+    combinedAaDataCount += result.aaData.length;
+    console.log(`${LOG_PREFIX} Month ${monthFilter} totals: totalRecords=${result.totalRecords}, totalRowsFetched=${result.aaData.length}`);
+
+    const { rows: calendarRows, noProtocolCount } = parseAjaxRows(result.aaData, season);
+    console.log(`${LOG_PREFIX} Month ${monthFilter} parsed rows=${calendarRows.length}, noProtocol=${noProtocolCount}`);
+    totalNoProtocolCount += noProtocolCount;
+    allCalendarRows.push(...calendarRows);
   }
 
-  let payload: any;
-  try {
-    payload = JSON.parse(body);
-  } catch (err) {
-    console.error(`${LOG_PREFIX} Failed to parse JSON`, err);
-    return;
-  }
+  console.log(`${LOG_PREFIX} Total raw rows fetched across months: ${combinedAaDataCount}`);
 
-  const responseKeys = Object.keys(payload ?? {});
-  const aaData = Array.isArray(payload?.aaData) ? payload.aaData : [];
-  console.log(`${LOG_PREFIX} Response keys: ${responseKeys.join(', ')}`);
-  console.log(`${LOG_PREFIX} aaData length: ${aaData.length}`);
-
-  const { rows: calendarRows, noProtocolCount } = parseAjaxRows(aaData, season);
-  if (!calendarRows.length) {
+  if (!allCalendarRows.length) {
     console.warn(`${LOG_PREFIX} No calendar rows parsed; exiting`);
     return;
   }
 
+  const dedupedMap = new Map<string, CalendarRow>();
+  allCalendarRows.forEach((row) => {
+    const key = row.protocolId
+      ? `proto:${row.protocolId}`
+      : `fallback:${row.date.toISOString()}|${normalize(row.homeName)}|${normalize(row.awayName)}|${seasonCode}`;
+    if (!dedupedMap.has(key)) {
+      dedupedMap.set(key, row);
+    }
+  });
+  const calendarRows = Array.from(dedupedMap.values());
+  console.log(`${LOG_PREFIX} Unique calendar rows after merge: ${calendarRows.length}`);
+
   const parsedMatches = buildParsedMatches(calendarRows);
-  console.log(`${LOG_PREFIX} Parsed rows`, { parsed: parsedMatches.length, noProtocolCount });
-  console.log(`${LOG_PREFIX} Rows without protocol link: ${noProtocolCount}`);
+  console.log(`${LOG_PREFIX} Parsed rows`, { parsed: parsedMatches.length, noProtocolCount: totalNoProtocolCount });
+  console.log(`${LOG_PREFIX} Rows without protocol link: ${totalNoProtocolCount}`);
 
   const teams = await loadTeams(supa.client);
   console.log(`${LOG_PREFIX} Loaded ${teams.length} teams for mapping`);
 
-  const { upserted, skipped } = await upsertMatches(
+  const {
+    upserted,
+    skipped,
+    scheduledProcessed,
+    scheduledSkipped,
+    scheduledInsertedOrUpdated,
+  } = await upsertMatches(
     supa.client,
     parsedMatches,
     season,
@@ -335,13 +521,14 @@ async function main(): Promise<void> {
   const withoutProtocolCount = parsedMatches.length - withProtocolCount;
 
   console.log(
-    `${LOG_PREFIX} Summary: aaData=${aaData.length}, parsed=${parsedMatches.length}, upserted=${upserted}, skipped=${skipped}, finished=${finishedCount}, scheduled=${scheduledCount}, protocolLinks=${withProtocolCount}, withoutProtocol=${withoutProtocolCount}`,
+    `${LOG_PREFIX} Summary: total_raw_rows=${combinedAaDataCount}, unique_rows=${calendarRows.length}, parsed=${parsedMatches.length}, upserted=${upserted}, skipped=${skipped}, finished=${finishedCount}, scheduled=${scheduledCount}, protocolLinks=${withProtocolCount}, withoutProtocol=${withoutProtocolCount}, scheduled_processed=${scheduledProcessed}, scheduled_skipped=${scheduledSkipped}, scheduled_inserted_or_updated=${scheduledInsertedOrUpdated}`,
   );
 
   const examples = parsedMatches.slice(0, 3).map((m) => {
     const dateIso = m.date.toISOString();
     const protoOrFallback =
-      m.protocolId ?? `${league}:${seasonCode}:${m.date.toISOString().split('T')[0]}:${normalize(m.homeName)}:${normalize(m.awayName)}`;
+      m.protocolId ??
+      `${m.date.toISOString()}|${normalize(m.homeName)}|${normalize(m.awayName)}|${seasonCode}`;
     return {
       date: dateIso,
       home: m.homeName,

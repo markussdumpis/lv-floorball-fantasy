@@ -36,6 +36,8 @@ npm install
 
 - `npm run seed:stats` – one-shot seed that pulls both pages and writes players + teams.
 - `npm run refresh:stats` – repeatable update using the same logic (idempotent upserts).
+- `npm run ingest:matches -- --season=2025 --league=vv` – scrape calendar rows for a season/league and upsert matches by `external_id`.
+- `npm run ingest:match-events -- --matchId=<uuid>` – parse a single protocol page and upsert goal events for that match id.
 
 Both commands log counts for processed teams and players. The ingest run calls `public.recompute_prices()` automatically after upserting rows.
 

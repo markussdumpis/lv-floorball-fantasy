@@ -10,7 +10,10 @@
     "compute:prices": "tsx src/computePrices.ts",
     "compute:match-points": "tsx src/computeMatchPoints.ts",
     "scrape:match": "tsx src/scrapeMatchProtocol.ts",
-    "typecheck": "tsc --noEmit"
+    "ingest:matches": "tsx src/ingestMatches.ts",
+    "ingest:match-events": "tsx src/ingestMatchEvents.ts",
+    "typecheck": "tsc --noEmit",
+    "compute:match-points:all": "tsx src/computeMatchPoints.ts --all-finished"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.46.0",
