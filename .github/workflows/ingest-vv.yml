@@ -3,7 +3,7 @@ name: Ingest VV
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 3 * * *'
+    - cron: "0 1 * * *"
 
 jobs:
   ingest:
@@ -11,6 +11,7 @@ jobs:
     defaults:
       run:
         working-directory: services/lfs-ingest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -18,8 +19,8 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: services/lfs-ingest/package-lock.json
 
       - name: Install dependencies
