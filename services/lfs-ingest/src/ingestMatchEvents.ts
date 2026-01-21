@@ -6,6 +6,8 @@ import { fetchWithRetry } from './http.js';
 import { cleanText, extractCleanName, loadHtml } from './html.js';
 import { createSupabase } from './supa.js';
 
+const GOALIE_LOG_MATCH_ID = 'b02f425f-ee8c-4b97-9736-e6b6c7d0eb60';
+
 type MatchRow = {
   id: string;
   external_id: string;
@@ -25,6 +27,32 @@ type PlayerRow = {
   id: string;
   name: string | null;
   team_id: string;
+};
+
+type GoalieStart = {
+  raw: string;
+  teamLabel: string | null;
+  jerseyNumber: string | null;
+  name: string;
+};
+
+type GoalieLine = {
+  raw: string;
+  jerseyNumber: string | null;
+  name: string;
+  goalsAgainst: number | null;
+  shots: number | null;
+  minutesSeconds: number | null;
+};
+
+type InsertableGoalieStat = {
+  match_id: string;
+  player_id: string;
+  team_id: string;
+  shots: number | null;
+  saves: number;
+  goals_against: number;
+  minutes_seconds: number | null;
 };
 
 type ParsedGoal = {
@@ -141,15 +169,32 @@ function parseArgs(): { matchId: string | null; allFinished: boolean } {
   return { matchId, allFinished };
 }
 
-function buildProtocolUrl(externalId: string, season: string | null): string {
-  const seasonPath = season ?? '2025';
+function buildProtocolUrl(externalId: string | null, season: string | null): string | null {
+  if (!externalId) return null;
+  const numericIdMatch = externalId.match(/^(\d{3,})/);
+  if (!numericIdMatch) {
+    console.warn(`${LOG_PREFIX} Invalid external_id, missing numeric prefix`, { external_id: externalId });
+    return null;
+  }
+  const numericId = numericIdMatch[1];
+  const seasonPath = (season ?? '2025').split('-')[0] || '2025';
   // Default league path is vv per requirements.
-  return `https://www.floorball.lv/lv/${seasonPath}/chempionats/vv/proto/${externalId}`;
+  return `https://www.floorball.lv/lv/${seasonPath}/chempionats/vv/proto/${numericId}`;
 }
 
 function parseTimeToSeconds(raw: string | null): number | null {
   if (!raw) return null;
   const match = raw.match(/(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const minutes = Number.parseInt(match[1], 10);
+  const seconds = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+  return minutes * 60 + seconds;
+}
+
+function parseMinutesSeconds(raw: string | null): number | null {
+  if (!raw) return null;
+  const match = raw.match(/(\d{1,3}):(\d{2})/);
   if (!match) return null;
   const minutes = Number.parseInt(match[1], 10);
   const seconds = Number.parseInt(match[2], 10);
@@ -268,6 +313,55 @@ function parseGoalsFromHtml(html: string): { goals: ParsedGoal[]; penalties: Par
   return { goals, penalties, rowsScanned };
 }
 
+function parseGoalieStartsFromHtml(html: string): GoalieStart[] {
+  const text = cleanText(loadHtml(html).text());
+  const results: GoalieStart[] = [];
+  const regex = /v\u0101rtos\s*\(([^)]*)\)\s*v\u0101rtos\s*-\s*#?(\d{1,3})?\s*([^;]+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const teamLabel = normalizeWhitespace(match[1] ?? '');
+    const jerseyNumber = match[2] ? match[2].trim() : null;
+    const name = normalizeWhitespace(match[3] ?? '');
+    if (!name) continue;
+    results.push({
+      raw: match[0],
+      teamLabel: teamLabel || null,
+      jerseyNumber,
+      name,
+    });
+  }
+  return results;
+}
+
+function parseGoalieStatsFromHtml(html: string): GoalieLine[] {
+  const text = cleanText(loadHtml(html).text());
+  const results: GoalieLine[] = [];
+  const regex =
+    /v\u0101rtsarga stat\.?\s*#?(\d{1,3})?\s*([^-]+?)-\s*v\u0101rti:\s*(\d+)\s*;\s*metieni:\s*(\d+)\s*;\s*min\u016btes:\s*([0-9]{1,3}:[0-9]{2})/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const jerseyNumber = match[1] ? match[1].trim() : null;
+    const name = normalizeWhitespace(match[2] ?? '');
+    const goalsAgainst = Number.parseInt(match[3] ?? '', 10);
+    const shots = Number.parseInt(match[4] ?? '', 10);
+    const minutesSeconds = parseMinutesSeconds(match[5] ?? null);
+    if (!name) continue;
+    results.push({
+      raw: match[0],
+      jerseyNumber,
+      name,
+      goalsAgainst: Number.isFinite(goalsAgainst) ? goalsAgainst : null,
+      shots: Number.isFinite(shots) ? shots : null,
+      minutesSeconds,
+    });
+  }
+  if (!results.length && /v\u0101rtsarga stat/i.test(text)) {
+    const rawLines = text.match(/v\u0101rtsarga stat[^;]+/gi) ?? [];
+    console.warn(`${LOG_PREFIX} RAW_GOALIE_STAT_LINE_PARSE_FAIL`, rawLines.slice(0, 5));
+  }
+  return results;
+}
+
 async function fetchMatch(client: ReturnType<typeof createSupabase>['client'], matchId: string) {
   const { data, error } = await client
     .from('matches')
@@ -382,6 +476,23 @@ function mapPlayerId(
   return playerIndex.get(`${teamId}:${normalized}`) ?? null;
 }
 
+function mapPlayerIdAnyTeam(name: string | null, playerIndex: Map<string, string>): { playerId: string; teamId: string } | null {
+  if (!name) return null;
+  const normalized = normalizeName(name);
+  const matches: { playerId: string; teamId: string }[] = [];
+  playerIndex.forEach((value, key) => {
+    const [, normName] = key.split(':');
+    if (normName === normalized) {
+      const teamId = key.split(':')[0];
+      matches.push({ playerId: value, teamId });
+    }
+  });
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  return null;
+}
+
 async function ensureStubPlayer(
   client: SupabaseClient,
   teamId: string,
@@ -426,6 +537,92 @@ async function ensureStubPlayer(
   return data.id;
 }
 
+function resolveGoalieTeamId(teamLabel: string | null, teams: TeamRow[], homeId: string, awayId: string): string | null {
+  if (!teamLabel) return null;
+  const normalizedLabel = normalize(teamLabel);
+  const home = teams.find((t) => t.id === homeId);
+  const away = teams.find((t) => t.id === awayId);
+
+  for (const team of teams) {
+    const nameNorm = normalize(team.name);
+    const codeNorm = normalize(team.code);
+    if (normalizedLabel === nameNorm || normalizedLabel === codeNorm) {
+      return team.id;
+    }
+    if (nameNorm && normalizedLabel.includes(nameNorm)) {
+      return team.id;
+    }
+    if (codeNorm && normalizedLabel.includes(codeNorm)) {
+      return team.id;
+    }
+  }
+
+  if (/maj/i.test(teamLabel)) return homeId;
+  if (/vie/i.test(teamLabel)) return awayId;
+
+  if (home && normalizedLabel === normalize(home.name)) return home.id;
+  if (away && normalizedLabel === normalize(away.name)) return away.id;
+  return null;
+}
+
+function buildGoalieTeamLookup(starts: GoalieStart[], teams: TeamRow[], match: MatchRow): Map<string, string> {
+  const map = new Map<string, string>();
+  starts.forEach((start) => {
+    const teamId = resolveGoalieTeamId(start.teamLabel, teams, match.home_team, match.away_team);
+    if (!teamId) return;
+    if (start.jerseyNumber) {
+      map.set(`jersey:${start.jerseyNumber}`, teamId);
+    }
+    const normalized = normalizeName(start.name);
+    if (normalized) {
+      map.set(`name:${normalized}`, teamId);
+    }
+  });
+  return map;
+}
+
+function resolveGoalieTeamFromLine(
+  line: GoalieLine,
+  lookup: Map<string, string>,
+  match: MatchRow,
+): string | null {
+  if (line.jerseyNumber) {
+    const byJersey = lookup.get(`jersey:${line.jerseyNumber}`);
+    if (byJersey) return byJersey;
+  }
+
+  const byName = lookup.get(`name:${normalizeName(line.name)}`);
+  if (byName) return byName;
+
+  // Fallback: if two goalies and one already mapped, assign the other to the remaining team.
+  const teamsFound = new Set<string>(Array.from(lookup.values()));
+  if (teamsFound.size === 1) {
+    const only = Array.from(teamsFound)[0];
+    if (only === match.home_team) return match.away_team;
+    if (only === match.away_team) return match.home_team;
+  }
+
+  return null;
+}
+
+async function upsertMatchGoalieStats(
+  client: SupabaseClient,
+  matchId: string,
+  rows: InsertableGoalieStat[],
+): Promise<number> {
+  if (!rows.length) {
+    return 0;
+  }
+
+  const { error, count } = await client
+    .from('match_goalie_stats')
+    .upsert(rows, { onConflict: 'match_id,player_id', count: 'exact' });
+  if (error) {
+    throw error;
+  }
+  return count ?? rows.length;
+}
+
 async function ingestSingleMatch(
   supa: ReturnType<typeof createSupabase>,
   env: ReturnType<typeof getEnv>,
@@ -441,12 +638,25 @@ async function ingestSingleMatch(
   penaltiesInserted: number;
   misconductsDetected: number;
   redCardsDetected: number;
+  goalieStatsInserted: number;
 }> {
-  if (!match.external_id || match.external_id === '' || match.external_id.startsWith('vv:')) {
-    throw new Error('Match missing valid protocol slug');
-  }
-
   const protocolUrl = buildProtocolUrl(match.external_id, match.season);
+  if (!protocolUrl) {
+    console.warn(`${LOG_PREFIX} Invalid external_id, skipping match`, { match_id: match.id, external_id: match.external_id });
+    return {
+      eventsInserted: 0,
+      stubPlayersCreatedScorer: 0,
+      stubPlayersCreatedAssist: 0,
+      stubPlayersCreatedPenalty: 0,
+      unmappedAssistCount: 0,
+      unmappedScorers: 0,
+      unmappedPenaltyPlayers: 0,
+      penaltiesInserted: 0,
+      misconductsDetected: 0,
+      redCardsDetected: 0,
+      goalieStatsInserted: 0,
+    };
+  }
   console.log(`${LOG_PREFIX} Protocol URL: ${protocolUrl}`);
 
   const { body: html, status, headers } = await fetchWithRetry(protocolUrl, {
@@ -455,6 +665,22 @@ async function ingestSingleMatch(
       cookie: env.cookie,
     },
   });
+  if (status === 404) {
+    console.warn(`${LOG_PREFIX} protocol 404, skipping match`, { match_id: match.id, external_id: match.external_id });
+    return {
+      eventsInserted: 0,
+      stubPlayersCreatedScorer: 0,
+      stubPlayersCreatedAssist: 0,
+      stubPlayersCreatedPenalty: 0,
+      unmappedAssistCount: 0,
+      unmappedScorers: 0,
+      unmappedPenaltyPlayers: 0,
+      penaltiesInserted: 0,
+      misconductsDetected: 0,
+      redCardsDetected: 0,
+      goalieStatsInserted: 0,
+    };
+  }
   const contentType = headers.get('content-type') ?? 'unknown';
   console.log(`${LOG_PREFIX} Protocol response status ${status}, content-type ${contentType}`);
   const dumpPath = '/tmp/lfs-protocol-52064-lek-irl.html';
@@ -470,6 +696,7 @@ async function ingestSingleMatch(
   console.log(`${LOG_PREFIX} Rows scanned: ${rowsScanned}`);
   console.log(`${LOG_PREFIX} Goals parsed: ${parsedGoals.length}`);
   console.log(`${LOG_PREFIX} Penalties parsed: ${parsedPenalties.length}`);
+  const goalieRawLines = cleanText(loadHtml(html).text()).match(/v\u0101rtsarga stat[^;]+/gi) ?? [];
 
   const teams = await fetchTeams(supa.client, [match.home_team, match.away_team]);
   const players = await fetchPlayers(supa.client, [match.home_team, match.away_team]);
@@ -484,7 +711,60 @@ async function ingestSingleMatch(
   let penaltiesInserted = 0;
   let misconductsDetected = 0;
   let redCardsDetected = 0;
+  let goalieStatsInserted = 0;
   const events: InsertableEvent[] = [];
+  const goalieStats: InsertableGoalieStat[] = [];
+
+  const parsedGoalieStarts = parseGoalieStartsFromHtml(html);
+  const parsedGoalieStats = parseGoalieStatsFromHtml(html);
+  if (match.id === GOALIE_LOG_MATCH_ID) {
+    console.log(`${LOG_PREFIX} Goalie raw lines`, goalieRawLines);
+    console.log(`${LOG_PREFIX} Parsed goalie stats pre-upsert`, parsedGoalieStats);
+  }
+  const goalieTeamLookup = buildGoalieTeamLookup(parsedGoalieStarts, teams, match);
+  parsedGoalieStats.forEach((line) => {
+    const teamId = resolveGoalieTeamFromLine(line, goalieTeamLookup, match);
+    const cleanName = normalizeWhitespace(stripJerseyNumber(line.name));
+    let resolvedTeamId = teamId;
+    let playerId = resolvedTeamId ? mapPlayerId(cleanName, resolvedTeamId, playerIndex) : null;
+    if (!playerId) {
+      const anyTeam = mapPlayerIdAnyTeam(cleanName, playerIndex);
+      if (anyTeam) {
+        playerId = anyTeam.playerId;
+        resolvedTeamId = resolvedTeamId ?? anyTeam.teamId;
+      }
+    }
+
+    if (!resolvedTeamId) {
+      console.warn(`${LOG_PREFIX} UNMAPPED_GOALIE_TEAM`, { raw: line.raw });
+      return;
+    }
+
+    if (!playerId) {
+      playerId = mapPlayerId(cleanName, resolvedTeamId, playerIndex);
+    }
+    if (!playerId) {
+      console.warn(`${LOG_PREFIX} UNMAPPED_GOALIE_PLAYER`, {
+        raw: line.raw,
+        cleanName,
+        team_id: resolvedTeamId,
+      });
+      return;
+    }
+
+    const goalsAgainst = Math.max(0, line.goalsAgainst ?? 0);
+    const shots = Math.max(0, line.shots ?? 0);
+    const saves = Math.max(0, shots - goalsAgainst);
+    goalieStats.push({
+      match_id: match.id,
+      player_id: playerId,
+      team_id: resolvedTeamId,
+      shots: line.shots,
+      saves,
+      goals_against: goalsAgainst,
+      minutes_seconds: line.minutesSeconds,
+    });
+  });
 
   for (const goal of parsedGoals) {
     const teamId = goal.teamSide === 'home' ? match.home_team : goal.teamSide === 'away' ? match.away_team : null;
@@ -715,6 +995,7 @@ async function ingestSingleMatch(
   console.log(
     `${LOG_PREFIX} Summary: rows_scanned=${rowsScanned}, goals_detected=${parsedGoals.length}, penalties_detected=${parsedPenalties.length}, events_insertable=${events.length}, unmapped_scorers=${unmappedPlayers.size}, unmapped_assists=${unmappedAssistCount}, unmapped_penalties=${unmappedPenaltyPlayers}, stub_players_created_scorer=${stubCreatedScorerCount}, stub_players_created_assist=${stubCreatedAssistCount}, stub_players_created_penalty=${stubCreatedPenaltyCount}`,
   );
+  console.log(`${LOG_PREFIX} Goalie starts parsed: ${parsedGoalieStarts.length}, goalie stat lines parsed: ${parsedGoalieStats.length}`);
 
   console.log(`${LOG_PREFIX} Deleting existing events for match ${match.id}`);
   const { error: deleteError } = await supa.client.from('match_events').delete().eq('match_id', match.id);
@@ -751,7 +1032,16 @@ async function ingestSingleMatch(
 
   const inserted = count ?? events.length;
 
+  goalieStatsInserted = await upsertMatchGoalieStats(supa.client, match.id, goalieStats);
+
   console.log(`${LOG_PREFIX} Inserted events: ${inserted}`);
+  console.log(`${LOG_PREFIX} Inserted goalie stat rows: ${goalieStatsInserted}`);
+  if (match.id === GOALIE_LOG_MATCH_ID) {
+    console.log(`${LOG_PREFIX} Goalie summary`, {
+      parsed: parsedGoalieStats.length,
+      upserted: goalieStatsInserted,
+    });
+  }
   if (unmappedPlayers.size > 0) {
     console.warn(`${LOG_PREFIX} Unmapped players: ${Array.from(unmappedPlayers).join(', ')}`);
   }
@@ -767,6 +1057,7 @@ async function ingestSingleMatch(
     penaltiesInserted,
     misconductsDetected,
     redCardsDetected,
+    goalieStatsInserted,
   };
 }
 
@@ -794,6 +1085,9 @@ async function main(): Promise<void> {
     let totalPenaltiesInserted = 0;
     let totalMisconducts = 0;
     let totalRedCards = 0;
+    let totalGoalieRows = 0;
+    let matchesWithTwoGoalies = 0;
+    const matchesWithZeroGoalies: string[] = [];
 
     for (let i = 0; i < matches.length; i += 1) {
       const match = matches[i];
@@ -818,6 +1112,7 @@ async function main(): Promise<void> {
           penaltiesInserted,
           misconductsDetected,
           redCardsDetected,
+          goalieStatsInserted,
         } = await ingestSingleMatch(
           supa,
           env,
@@ -833,6 +1128,9 @@ async function main(): Promise<void> {
         totalPenaltiesInserted += penaltiesInserted;
         totalMisconducts += misconductsDetected;
         totalRedCards += redCardsDetected;
+        totalGoalieRows += goalieStatsInserted;
+        if (goalieStatsInserted === 2) matchesWithTwoGoalies += 1;
+        if (goalieStatsInserted === 0) matchesWithZeroGoalies.push(match.id);
       } catch (error) {
         failed += 1;
         const reason = (error as Error)?.message ?? 'unknown';
@@ -843,6 +1141,12 @@ async function main(): Promise<void> {
     console.log(
       `${LOG_PREFIX} Batch summary: total_matches_considered=${totalConsidered}, succeeded=${succeeded}, failed=${failed}, skipped=${skipped}, events_inserted=${totalEventsInserted}, penalties_inserted=${totalPenaltiesInserted}, misconducts_detected=${totalMisconducts}, red_cards_detected=${totalRedCards}, stub_players_created_scorer=${totalStubPlayersScorer}, stub_players_created_assist=${totalStubPlayersAssist}, stub_players_created_penalty=${totalStubPlayersPenalty}, unmapped_assists=${totalUnmappedAssists}, unmapped_penalties=${totalUnmappedPenalties}`,
     );
+    console.log(
+      `${LOG_PREFIX} Goalie summary: total_goalie_rows=${totalGoalieRows}, matches_with_two_goalies=${matchesWithTwoGoalies}, matches_with_zero_goalies=${matchesWithZeroGoalies.length}`,
+    );
+    if (matchesWithZeroGoalies.length) {
+      console.log(`${LOG_PREFIX} Matches missing goalie stats: ${matchesWithZeroGoalies.join(', ')}`);
+    }
     return;
   }
 
