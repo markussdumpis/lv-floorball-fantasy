@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { getEnv } from '../env.js';
 import { createSupabase } from '../supa.js';
+import { fetchWithRetry } from '../http.js';
 
 type MatchRow = { id: string; external_id: string | null; status: string | null; season: string | null; date: string | null };
 
@@ -93,11 +94,33 @@ async function fetchCountsByMatch(
   return map;
 }
 
+async function assertLfsAccess(env: ReturnType<typeof getEnv>): Promise<void> {
+  const url = 'https://www.floorball.lv/lv/';
+  try {
+    const { status } = await fetchWithRetry(url, {
+      headers: {
+        'user-agent': env.userAgent,
+        cookie: env.cookie,
+      },
+    });
+    if (status !== 200) {
+      console.error('[cli] LFS access check failed', { status, url });
+      process.exit(1);
+    }
+    console.log('[cli] LFS access check OK', { status });
+  } catch (err) {
+    console.error('[cli] LFS access check failed', { url, error: err instanceof Error ? err.message : String(err) });
+    process.exit(1);
+  }
+}
+
 async function main() {
   // Fail fast if env missing
-  getEnv();
-  const supa = createSupabase(getEnv());
+  const env = getEnv();
+  const supa = createSupabase(env);
   const season = '2025-26';
+
+  await assertLfsAccess(env);
 
   console.log('[cli] Loading finished matches for season', season);
   const matches = await fetchFinishedMatches(supa.client, season);
