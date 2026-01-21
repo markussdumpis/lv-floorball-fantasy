@@ -26,6 +26,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Debug scripts
+        run: |
+          pwd
+          ls -la
+          node -v
+          npm -v
+          cat package.json | sed -n '1,120p'
+          npm run
+
       - name: Run ingest:vv
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
