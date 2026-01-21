@@ -1,9 +1,12 @@
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { getEnv } from '../env.js';
 import { createSupabase } from '../supa.js';
 
 type MatchRow = { id: string; external_id: string | null; status: string | null; season: string | null };
+
+const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 async function countMatchEvents(client: ReturnType<typeof createSupabase>['client'], matchId: string): Promise<number> {
   const { count } = await client.from('match_events').select('id', { count: 'exact', head: true }).eq('match_id', matchId);
@@ -41,7 +44,7 @@ async function fetchFinishedMatches(
 
 function runCli(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', env: process.env, cwd: new URL('..', import.meta.url).pathname });
+    const child = spawn(command, args, { stdio: 'inherit', env: process.env, cwd: PROJECT_ROOT });
     child.on('exit', (code) => {
       if (code === 0) resolve();
       else reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
