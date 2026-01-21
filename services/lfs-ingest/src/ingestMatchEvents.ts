@@ -1022,17 +1022,70 @@ async function ingestSingleMatch(
     };
   }
 
-  const { error: insertError, count } = await supa.client
-    .from('match_events')
-    .insert(events, { count: 'exact' });
+  const dedupedEvents = (() => {
+    const byKey = new Map<string, typeof events[number]>();
+    for (const ev of events) {
+      const key = `${ev.match_id}|${ev.event_type}|${ev.period ?? ''}|${ev.time ?? ''}|${ev.player_id ?? ''}|${
+        ev.assist_id ?? ''
+      }|${ev.pen_min ?? 0}|${ev.reason ?? ''}`;
+      if (!byKey.has(key)) {
+        byKey.set(key, ev);
+      }
+    }
+    return Array.from(byKey.values());
+  })();
 
-  if (insertError) {
-    throw insertError;
+  console.log(
+    `${LOG_PREFIX} events_before=${events.length} events_after=${dedupedEvents.length} removed=${events.length - dedupedEvents.length}`,
+  );
+
+  const dedupedGoalieStats = (() => {
+    const byKey = new Map<string, InsertableGoalieStat>();
+    for (const row of goalieStats) {
+      const key = `${row.match_id}|${row.player_id}`;
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, row);
+        continue;
+      }
+      const existingMinutes = existing.minutes_seconds ?? -1;
+      const currentMinutes = row.minutes_seconds ?? -1;
+      if (currentMinutes >= existingMinutes) {
+        byKey.set(key, row);
+      }
+    }
+    return Array.from(byKey.values());
+  })();
+
+  console.log(
+    `${LOG_PREFIX} goalie_rows_before=${goalieStats.length} goalie_rows_after=${dedupedGoalieStats.length} removed=${
+      goalieStats.length - dedupedGoalieStats.length
+    }`,
+  );
+
+  console.log(`${LOG_PREFIX} DB upsert match_events rows=${dedupedEvents.length}`);
+  let inserted = 0;
+  try {
+    const { error: insertError, count } = await supa.client
+      .from('match_events')
+      .insert(dedupedEvents, { count: 'exact' });
+
+    if (insertError) {
+      throw insertError;
+    }
+    inserted = count ?? dedupedEvents.length;
+  } catch (err) {
+    console.error(`${LOG_PREFIX} DB FAILED match_events`, err);
+    throw err;
   }
 
-  const inserted = count ?? events.length;
-
-  goalieStatsInserted = await upsertMatchGoalieStats(supa.client, match.id, goalieStats);
+  console.log(`${LOG_PREFIX} DB upsert match_goalie_stats rows=${dedupedGoalieStats.length}`);
+  try {
+    goalieStatsInserted = await upsertMatchGoalieStats(supa.client, match.id, dedupedGoalieStats);
+  } catch (err) {
+    console.error(`${LOG_PREFIX} DB FAILED match_goalie_stats`, err);
+    throw err;
+  }
 
   console.log(`${LOG_PREFIX} Inserted events: ${inserted}`);
   console.log(`${LOG_PREFIX} Inserted goalie stat rows: ${goalieStatsInserted}`);
