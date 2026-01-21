@@ -4,9 +4,10 @@ import { spawn } from 'node:child_process';
 import { getEnv } from '../env.js';
 import { createSupabase } from '../supa.js';
 
-type MatchRow = { id: string; external_id: string | null; status: string | null; season: string | null };
+type MatchRow = { id: string; external_id: string | null; status: string | null; season: string | null; date: string | null };
 
 const PROJECT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const RECENT_DAYS = 7;
 
 async function countMatchEvents(client: ReturnType<typeof createSupabase>['client'], matchId: string): Promise<number> {
   const { count } = await client.from('match_events').select('id', { count: 'exact', head: true }).eq('match_id', matchId);
@@ -32,7 +33,7 @@ async function fetchFinishedMatches(
 ): Promise<MatchRow[]> {
   const { data, error } = await client
     .from('matches')
-    .select('id, external_id, status, season')
+    .select('id, external_id, status, season, date')
     .eq('season', season)
     .eq('status', 'finished')
     .order('date', { ascending: true });
@@ -73,6 +74,25 @@ async function fetchSanityAssistAndGoalies(client: ReturnType<typeof createSupab
   return { assistsSum, goalieMatches };
 }
 
+async function fetchCountsByMatch(
+  client: ReturnType<typeof createSupabase>['client'],
+  table: 'match_events' | 'match_goalie_stats',
+  matchIds: string[],
+): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  if (matchIds.length === 0) return map;
+  const { data, error } = await client.from(table).select('match_id').in('match_id', matchIds);
+  if (error) {
+    throw error;
+  }
+  for (const row of data ?? []) {
+    const id = (row as any).match_id as string | null;
+    if (!id) continue;
+    map.set(id, (map.get(id) ?? 0) + 1);
+  }
+  return map;
+}
+
 async function main() {
   // Fail fast if env missing
   getEnv();
@@ -83,48 +103,113 @@ async function main() {
   const matches = await fetchFinishedMatches(supa.client, season);
   console.log('[cli] total_finished', matches.length);
 
-  const matchesNeedingIngest: MatchRow[] = [];
-  for (const match of matches) {
-    const eventsCount = await countMatchEvents(supa.client, match.id);
-    const goalieCount = await countGoalieStats(supa.client, match.id);
-    if (eventsCount === 0 || goalieCount === 0) {
-      matchesNeedingIngest.push(match);
-    }
-  }
+  const matchIds = matches.map((m) => m.id);
+  const eventCounts = await fetchCountsByMatch(supa.client, 'match_events', matchIds);
+  const goalieCounts = await fetchCountsByMatch(supa.client, 'match_goalie_stats', matchIds);
 
-  console.log('[cli] Matches needing protocol ingest', matchesNeedingIngest.length);
+  const recentCutoff = new Date(Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000);
+  const recentMatches = matches.filter((m) => {
+    if (!m.date) return false;
+    const d = new Date(m.date);
+    return Number.isFinite(d.valueOf()) && d >= recentCutoff;
+  });
+
+  const missingEvents = matches.filter((m) => !eventCounts.get(m.id));
+  const missingGoalies = matches.filter((m) => !goalieCounts.get(m.id));
+
+  const missingEventsSet = new Set(missingEvents.map((m) => m.id));
+  const missingGoaliesSet = new Set(missingGoalies.map((m) => m.id));
+  const recentSet = new Set(recentMatches.map((m) => m.id));
+
+  const matchesNeedingIngest = matches.filter(
+    (m) => missingEventsSet.has(m.id) || missingGoaliesSet.has(m.id) || recentSet.has(m.id),
+  );
+
+  console.log('[cli] Selection', {
+    total_finished: matches.length,
+    recent_window_days: RECENT_DAYS,
+    recent_candidates: recentMatches.length,
+    missing_events_count: missingEvents.length,
+    missing_goalie_stats_count: missingGoalies.length,
+    matches_to_process: matchesNeedingIngest.length,
+  });
 
   let totalEvents = 0;
   let totalGoalieRows = 0;
   let totalPmpRows = 0;
+  const processed: MatchRow[] = [];
+  const skipped: { match: MatchRow; reason: string }[] = [];
+  const failed: { match: MatchRow; reason: string }[] = [];
 
   for (let i = 0; i < matchesNeedingIngest.length; i += 1) {
     const match = matchesNeedingIngest[i];
     console.log(`[cli] [${i + 1}/${matchesNeedingIngest.length}] ingesting match ${match.id} ext=${match.external_id ?? ''}`);
-    await runCli('npx', ['tsx', 'src/ingestMatchEvents.ts', '--matchId', match.id]);
-    const eventCount = await countMatchEvents(supa.client, match.id);
-    const goalieCount = await countGoalieStats(supa.client, match.id);
-    totalEvents += eventCount;
-    totalGoalieRows += goalieCount;
 
-    console.log(`[cli] computing points for ${match.id}`);
-    await runCli('npx', ['tsx', 'src/computeMatchPoints.ts', match.id]);
-    const pmpCount = await countPlayerMatchPoints(supa.client, match.id);
-    totalPmpRows += pmpCount;
+    if (!match.external_id || !/^[0-9]/.test(match.external_id)) {
+      const reason = 'non-numeric external_id';
+      console.warn(`[cli] skipping match ${match.id} (${match.external_id ?? 'n/a'}) - ${reason}`);
+      skipped.push({ match, reason });
+      continue;
+    }
+
+    try {
+      await runCli('npx', ['tsx', 'src/ingestMatchEvents.ts', '--matchId', match.id]);
+      const eventCount = await countMatchEvents(supa.client, match.id);
+      const goalieCount = await countGoalieStats(supa.client, match.id);
+      const skippedByIngest = eventCount === 0 && goalieCount === 0;
+
+      if (skippedByIngest) {
+        const reason = 'ingest returned zero rows (likely skip/404)';
+        console.warn(`[cli] skipping match ${match.id} (${match.external_id ?? ''}) - ${reason}`);
+        skipped.push({ match, reason });
+        continue;
+      }
+
+      totalEvents += eventCount;
+      totalGoalieRows += goalieCount;
+
+      console.log(`[cli] computing points for ${match.id}`);
+      await runCli('npx', ['tsx', 'src/computeMatchPoints.ts', match.id]);
+      const pmpCount = await countPlayerMatchPoints(supa.client, match.id);
+      totalPmpRows += pmpCount;
+      processed.push(match);
+    } catch (err: any) {
+      const reason = err?.message ?? 'unknown error';
+      console.error(`[cli] match failed ${match.id} (${match.external_id ?? ''})`, err);
+      failed.push({ match, reason });
+    }
   }
 
   const { assistsSum, goalieMatches } = await fetchSanityAssistAndGoalies(supa.client);
 
-  console.log('[cli] SUMMARY', {
+  const summary = {
     season,
     total_finished_matches: matches.length,
-    matches_processed: matchesNeedingIngest.length,
+    matches_needing_protocol: matchesNeedingIngest.length,
+    processed_count: processed.length,
+    skipped_count: skipped.length,
+    skipped_samples: skipped.slice(0, 10).map((s) => s.match.external_id ?? 'n/a'),
+    failed_count: failed.length,
+    failed_samples: failed.slice(0, 10).map((f) => `${f.match.external_id ?? 'n/a'}:${f.reason}`),
     match_events_rows: totalEvents,
     match_goalie_stats_rows: totalGoalieRows,
     player_match_points_rows: totalPmpRows,
     assists_sum: assistsSum,
     goalie_match_count_with_saves: goalieMatches,
-  });
+  };
+  console.log('[cli] SUMMARY', summary);
+
+  if (failed.length === 0) {
+    process.exitCode = 0;
+  } else {
+    const failRatio = failed.length / Math.max(1, matchesNeedingIngest.length);
+    if (failRatio >= 0.2) {
+      process.exitCode = 1;
+    } else {
+      console.warn(`[cli] some matches failed but under threshold (${failed.length}/${matchesNeedingIngest.length})`);
+      process.exitCode = 0;
+    }
+  }
 }
 
 const entryPoint = process.argv[1];
