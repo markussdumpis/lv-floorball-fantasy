@@ -103,25 +103,13 @@ function stripHtml(value: string | null | undefined): string {
 
 function extractProtocolId(href: string | null): string | null {
   if (!href) return null;
-  try {
-    const url = new URL(href, 'https://www.floorball.lv');
-    // Capture the full proto slug segment (may include suffixes like "-bsk-ulb").
-    const match = url.pathname.match(/\/proto\/([^\/?#]+)/);
-    if (match && match[1]) {
-      return match[1];
-    }
-    if (url.pathname.includes('/proto/')) {
-      console.warn(`${LOG_PREFIX} Failed to extract protocolId from href containing /proto/`, { href });
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  const match = href.match(/(?:^|\/)proto\/([^\/?#'"\s]+)/);
+  return match?.[1] ?? null;
 }
 
 function extractProtocolIdFromText(text: string | null): string | null {
   if (!text) return null;
-  const match = text.match(/\/proto\/([^\/?#]+)/);
+  const match = text.match(/(?:^|\/)proto\/([^\/?#'"\s]+)/);
   return match?.[1] ?? null;
 }
 
@@ -150,6 +138,13 @@ function parseAjaxRows(aaData: unknown[], seasonYear: string): { rows: CalendarR
     const protocolId = extractProtocolId(rowHtml) ?? extractProtocolIdFromText(rowHtml);
     if (!protocolId) {
       noProtocolCount += 1;
+      if (parsedDate < new Date()) {
+        console.log('[matches] past match missing proto', {
+          date: parsedDate.toISOString(),
+          home: homeText,
+          away: awayText,
+        });
+      }
     }
     const resultText = stripHtml(resultCell);
     const scoreMatch = resultText.match(/(\d+)\s*:\s*(\d+)/);
