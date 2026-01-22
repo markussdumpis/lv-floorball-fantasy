@@ -98,6 +98,7 @@ function extractProtocolId(href: string | null): string | null {
   if (!href) return null;
   try {
     const url = new URL(href, 'https://www.floorball.lv');
+    // Some proto links include suffixes like "-bsk-ulb"; capture the leading numeric id.
     const match = url.pathname.match(/\/proto\/(\d+)/);
     if (match && match[1]) {
       return match[1];
