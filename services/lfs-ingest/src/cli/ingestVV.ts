@@ -141,8 +141,8 @@ async function main() {
     return Number.isFinite(d.valueOf()) && d >= recentCutoff;
   });
 
-  const missingEvents = matches.filter((m) => !eventCounts.get(m.id));
-  const missingGoalies = matches.filter((m) => !goalieCounts.get(m.id));
+  const missingEvents = matches.filter((m) => (eventCounts.get(m.id) ?? 0) === 0);
+  const missingGoalies = matches.filter((m) => (goalieCounts.get(m.id) ?? 0) === 0);
 
   const missingEventsSet = new Set(missingEvents.map((m) => m.id));
   const missingGoaliesSet = new Set(missingGoalies.map((m) => m.id));
@@ -159,6 +159,12 @@ async function main() {
     missing_events_count: missingEvents.length,
     missing_goalie_stats_count: missingGoalies.length,
     matches_to_process: matchesNeedingIngest.length,
+  });
+  console.log('[cli] Selection breakdown', {
+    selected_for_processing_count: matchesNeedingIngest.length,
+    selected_recent_count: matchesNeedingIngest.filter((m) => recentSet.has(m.id)).length,
+    selected_missing_events_count: matchesNeedingIngest.filter((m) => missingEventsSet.has(m.id)).length,
+    selected_missing_goalies_count: matchesNeedingIngest.filter((m) => missingGoaliesSet.has(m.id)).length,
   });
 
   let totalEvents = 0;
