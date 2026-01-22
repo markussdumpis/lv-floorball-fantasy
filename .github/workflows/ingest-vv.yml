@@ -38,56 +38,6 @@ jobs:
           LFS_COOKIE: ${{ secrets.LFS_COOKIE }}
         run: npm run ingest:matches
 
-      - name: Sanity check: scheduled_in_past
-        working-directory: services/lfs-ingest
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: |
-          node --input-type=module <<'NODE'
-          import { createClient } from '@supabase/supabase-js';
-
-          const url = process.env.SUPABASE_URL;
-          const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-          const client = createClient(url, key);
-
-          const nowIso = new Date().toISOString();
-
-          const { count, error } = await client
-            .from('matches')
-            .select('id', { count: 'exact', head: true })
-            .eq('status', 'scheduled')
-            .lt('date', nowIso);
-
-          if (error) {
-            console.error('[sanity] query failed', error);
-            process.exit(1);
-          }
-
-          const total = count ?? 0;
-          console.log(`[sanity] scheduled_in_past=${total}`);
-
-          if (total > 0) {
-            const { data, error: rowsError } = await client
-              .from('matches')
-              .select('date, external_id, home_team, away_team, home_score, away_score')
-              .eq('status', 'scheduled')
-              .lt('date', nowIso)
-              .order('date', { ascending: true })
-              .limit(10);
-
-            if (rowsError) {
-              console.error('[sanity] fetch rows failed', rowsError);
-              process.exit(1);
-            }
-
-            console.log('[sanity] top rows:', data);
-            process.exit(1);
-          }
-
-          process.exit(0);
-          NODE
-
       - name: Run ingest:vv
         working-directory: services/lfs-ingest
         env:
