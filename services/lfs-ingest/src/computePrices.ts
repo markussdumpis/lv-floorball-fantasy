@@ -3,6 +3,7 @@ import { getEnv } from './env.js';
 import { createSupabase } from './supa.js';
 
 type FantasyPosition = 'A' | 'D' | 'V';
+const MIN_GAMES = 5;
 
 type PlayerRow = {
   id: string;
@@ -38,7 +39,7 @@ const REPLACEMENT_INDEX: Record<FantasyPosition, number> = {
 const PRICE_RANGE: Record<FantasyPosition, [number, number]> = {
   A: [4, 13],
   D: [3, 14],
-  V: [5, 12],
+  V: [6, 14],
 };
 
 function mapFantasyPosition(dbPos: string | null | undefined): FantasyPosition {
@@ -99,6 +100,39 @@ async function main(): Promise<void> {
   const supa = createSupabase(env);
   const supabase = supa.client;
 
+  const { data: matchPoints, error: matchPointsError } = await supabase
+    .from('player_match_points')
+    .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status)')
+    .eq('matches.status', 'finished');
+
+  if (matchPointsError) {
+    console.error('[prices] Failed to load player_match_points', matchPointsError);
+    process.exitCode = 1;
+    return;
+  }
+
+  type PmpAgg = { games: number; total: number };
+  const pmpMap = new Map<string, PmpAgg>();
+  const seenPerPlayer = new Map<string, Set<string>>();
+
+  for (const row of matchPoints ?? []) {
+    const playerId = (row as any).player_id as string | null;
+    const matchId = (row as any).match_id as string | null;
+    if (!playerId || !matchId) continue;
+    let seen = seenPerPlayer.get(playerId);
+    if (!seen) {
+      seen = new Set();
+      seenPerPlayer.set(playerId, seen);
+    }
+    if (seen.has(matchId)) continue;
+    seen.add(matchId);
+    const totalPoints = asNumber((row as any).fantasy_points) + asNumber((row as any).fantasy_points_bonus);
+    const agg = pmpMap.get(playerId) ?? { games: 0, total: 0 };
+    agg.games += 1;
+    agg.total += totalPoints;
+    pmpMap.set(playerId, agg);
+  }
+
   const { data: players, error } = await supabase.from('players').select('*');
   if (error) {
     console.error('[prices] Failed to load players', error);
@@ -115,9 +149,10 @@ async function main(): Promise<void> {
   for (const raw of players ?? []) {
     if (!raw?.id) continue;
     const fantasyPosition = mapFantasyPosition((raw as PlayerRow).position ?? null);
-    const games = Math.max(0, asNumber((raw as PlayerRow).games));
-    const fantasyPoints = computeFantasyPoints(raw as PlayerRow, fantasyPosition);
-    const fppg = games > 0 ? fantasyPoints / games : 0;
+    const agg = pmpMap.get(raw.id);
+    const games = agg?.games ?? 0;
+    const fppg =
+      games >= MIN_GAMES ? (agg?.total ?? 0) / games : games > 0 ? (agg?.total ?? 0) / games : 0;
 
     computed[fantasyPosition].push({
       ...(raw as PlayerRow),
@@ -151,7 +186,11 @@ async function main(): Promise<void> {
       const inv = 1 - p;
       const curved = Math.pow(inv, 0.8);
       const priceRaw = minPrice + curved * (maxPrice - minPrice);
-      const clamped = Math.min(maxPrice, Math.max(minPrice, priceRaw));
+      let adjusted = priceRaw;
+      if (fantasyPosition === 'V') {
+        adjusted *= 1.1;
+      }
+      const clamped = Math.min(maxPrice, Math.max(minPrice, adjusted));
       const computedPrice = Math.round(clamped * 2) / 2; // nearest 0.5
       const finalPrice = player.price_manual ?? computedPrice;
 
