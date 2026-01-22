@@ -53,7 +53,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          node --input-type=module - <<'NODE'
+          node --input-type=module <<'NODE'
             import { createClient } from '@supabase/supabase-js';
 
             const url = process.env.SUPABASE_URL;
@@ -64,7 +64,6 @@ jobs:
             const { count, error } = await client
               .from('matches')
               .select('id', { count: 'exact', head: true })
-              .eq('season', '2025-26')
               .eq('status', 'scheduled')
               .lt('date', nowIso);
 
@@ -79,8 +78,7 @@ jobs:
             if (total > 0) {
               const { data, error: rowsError } = await client
                 .from('matches')
-                .select('date, external_id, home_team, away_team')
-                .eq('season', '2025-26')
+                .select('date, external_id, home_team, away_team, home_score, away_score')
                 .eq('status', 'scheduled')
                 .lt('date', nowIso)
                 .order('date', { ascending: true })
@@ -94,6 +92,7 @@ jobs:
               console.log('[sanity] top rows:', data);
               process.exit(1);
             }
+            process.exit(0);
           NODE
 
       - name: Run ingest:vv
