@@ -133,10 +133,12 @@ function aggregatePlayerEvents(
   let penaltyShotMissed = 0;
   let doubleMinorCount = 0;
   let minorCount = 0;
+  let mvpCount = 0;
 
   for (const ev of events) {
     if (ev.event_type === 'goal') goals += 1;
     if (ev.event_type === 'save') savesFromEvents += 1;
+    if (ev.event_type === 'mvp') mvpCount += 1;
     if (ev.event_type === 'minor_2') {
       penMin += 2;
       minorCount += 1;
@@ -213,6 +215,7 @@ function aggregatePlayerEvents(
     penaltyPoints +
     misconductPoints +
     redCardPoints +
+    mvpCount * 2 +
     savePoints +
     gaBandPoints;
 

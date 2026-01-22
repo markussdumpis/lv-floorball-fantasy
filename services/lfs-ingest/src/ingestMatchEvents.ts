@@ -80,6 +80,12 @@ type ParsedPenalty = {
   servedByName: string | null;
 };
 
+type ParsedMvp = {
+  timeText: string | null;
+  jerseyNumber: string | null;
+  name: string;
+};
+
 type InsertableEvent = {
   match_id: string;
   ts_seconds: number | null;
@@ -87,10 +93,11 @@ type InsertableEvent = {
   team_id: string;
   player_id: string;
   assist_id: string | null;
-  event_type: 'goal' | 'minor_2' | 'double_minor' | 'misconduct_10' | 'red_card';
+  event_type: 'goal' | 'minor_2' | 'double_minor' | 'misconduct_10' | 'red_card' | 'mvp';
   value: number | null;
   raw: unknown;
   created_at: string;
+  external_id?: string;
 };
 
 const LOG_PREFIX = '[ingest:match-events]';
@@ -311,6 +318,22 @@ function parseGoalsFromHtml(html: string): { goals: ParsedGoal[]; penalties: Par
   });
 
   return { goals, penalties, rowsScanned };
+}
+
+function parseMvpFromHtml(html: string): ParsedMvp[] {
+  const text = cleanText(loadHtml(html).text());
+  const results: ParsedMvp[] = [];
+  const regex = /Labākais\s+spēlētājs[^#\d]*(?:#|nr\.?)?(\d{1,3})?\s*([^\n;]+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const jerseyNumber = match[1] ? match[1].trim() : null;
+    const name = normalizeWhitespace(match[2] ?? '');
+    const timeMatch = match[0].match(/(\d{1,2}:\d{2})/);
+    const timeText = timeMatch ? timeMatch[1] : null;
+    if (!name) continue;
+    results.push({ timeText, jerseyNumber, name });
+  }
+  return results;
 }
 
 function parseGoalieStartsFromHtml(html: string): GoalieStart[] {
@@ -693,9 +716,11 @@ async function ingestSingleMatch(
   console.log(`${LOG_PREFIX} Protocol preview (500 chars): ${html.slice(0, 500)}`);
 
   const { goals: parsedGoals, penalties: parsedPenalties, rowsScanned } = parseGoalsFromHtml(html);
+  const parsedMvps = parseMvpFromHtml(html);
   console.log(`${LOG_PREFIX} Rows scanned: ${rowsScanned}`);
   console.log(`${LOG_PREFIX} Goals parsed: ${parsedGoals.length}`);
   console.log(`${LOG_PREFIX} Penalties parsed: ${parsedPenalties.length}`);
+  console.log(`${LOG_PREFIX} MVP parsed: ${parsedMvps.length}`);
   const goalieRawLines = cleanText(loadHtml(html).text()).match(/v\u0101rtsarga stat[^;]+/gi) ?? [];
 
   const teams = await fetchTeams(supa.client, [match.home_team, match.away_team]);
@@ -714,6 +739,7 @@ async function ingestSingleMatch(
   let goalieStatsInserted = 0;
   const events: InsertableEvent[] = [];
   const goalieStats: InsertableGoalieStat[] = [];
+  let mvpInserted = 0;
 
   const parsedGoalieStarts = parseGoalieStartsFromHtml(html);
   const parsedGoalieStats = parseGoalieStatsFromHtml(html);
@@ -765,6 +791,51 @@ async function ingestSingleMatch(
       minutes_seconds: line.minutesSeconds,
     });
   });
+
+  for (const mvp of parsedMvps) {
+    const cleanName = normalizeWhitespace(stripJerseyNumber(mvp.name));
+    let resolvedTeamId: string | null = null;
+    let playerId: string | null = null;
+
+    const homeCandidate = mapPlayerId(cleanName, match.home_team, playerIndex);
+    const awayCandidate = mapPlayerId(cleanName, match.away_team, playerIndex);
+    if (homeCandidate && !awayCandidate) {
+      resolvedTeamId = match.home_team;
+      playerId = homeCandidate;
+    } else if (awayCandidate && !homeCandidate) {
+      resolvedTeamId = match.away_team;
+      playerId = awayCandidate;
+    } else if (homeCandidate && awayCandidate) {
+      resolvedTeamId = match.home_team;
+      playerId = homeCandidate;
+    } else {
+      const anyTeam = mapPlayerIdAnyTeam(cleanName, playerIndex);
+      if (anyTeam) {
+        resolvedTeamId = anyTeam.teamId;
+        playerId = anyTeam.playerId;
+      }
+    }
+
+    if (!resolvedTeamId || !playerId) {
+      console.warn(`${LOG_PREFIX} UNMAPPED_MVP_PLAYER`, { name: mvp.name, jersey: mvp.jerseyNumber });
+      continue;
+    }
+
+    events.push({
+      match_id: match.id,
+      ts_seconds: parseTimeToSeconds(mvp.timeText),
+      period: null,
+      team_id: resolvedTeamId,
+      player_id: playerId,
+      assist_id: null,
+      event_type: 'mvp',
+      value: null,
+      raw: { type: 'mvp', name: mvp.name, jersey: mvp.jerseyNumber },
+      external_id: `${match.id}:mvp:${resolvedTeamId}:${playerId}`,
+      created_at: new Date().toISOString(),
+    });
+    mvpInserted += 1;
+  }
 
   for (const goal of parsedGoals) {
     const teamId = goal.teamSide === 'home' ? match.home_team : goal.teamSide === 'away' ? match.away_team : null;
