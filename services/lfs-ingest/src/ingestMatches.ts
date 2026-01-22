@@ -171,31 +171,6 @@ async function loadTeams(client: SupabaseClient): Promise<TeamRow[]> {
   return data ?? [];
 }
 
-async function findExistingScheduledFixture(
-  client: SupabaseClient,
-  params: { season: string; date: string; home_team: string; away_team: string },
-): Promise<{ id: string; external_id: string | null } | null> {
-  const { data, error } = await client
-    .from('matches')
-    .select('id, external_id')
-    .eq('season', params.season)
-    .eq('date', params.date)
-    .eq('home_team', params.home_team)
-    .eq('away_team', params.away_team)
-    .eq('status', 'scheduled')
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  if (!data) {
-    return null;
-  }
-
-  return data as { id: string; external_id: string | null };
-}
-
 function buildParsedMatches(rows: CalendarRow[]): ParsedMatch[] {
   return rows.map((row) => {
     const protocolId = row.protocolId;
@@ -224,17 +199,33 @@ async function upsertMatches(
   teams: TeamRow[],
 ): Promise<{
   upserted: number;
+  inserted: number;
+  updated: number;
   skipped: number;
   scheduledProcessed: number;
-  scheduledSkipped: number;
-  scheduledInsertedOrUpdated: number;
 }> {
+  let inserted = 0;
+  let updated = 0;
   let skipped = 0;
   const unmappedTeams: Set<string> = new Set();
   const rowsToUpsert: Array<Record<string, unknown>> = [];
   let scheduledProcessed = 0;
-  let scheduledSkipped = 0;
-  let scheduledInsertedOrUpdated = 0;
+
+  const existingFixtureKeys = new Set<string>();
+  const { data: existingFixtures, error: existingFixturesError } = await client
+    .from('matches')
+    .select('season, date, home_team, away_team')
+    .eq('season', season);
+  if (existingFixturesError) {
+    console.warn(`${LOG_PREFIX} Failed to load existing fixtures for season ${season}; inserted/updated counts may be off`, {
+      error: existingFixturesError,
+    });
+  } else {
+    for (const row of existingFixtures ?? []) {
+      const key = `${row.season}|${row.date}|${row.home_team}|${row.away_team}`;
+      existingFixtureKeys.add(key);
+    }
+  }
 
   for (const match of matches) {
     const home = mapTeamId(match.homeName, teams);
@@ -250,43 +241,15 @@ async function upsertMatches(
 
     if (match.status === 'scheduled') {
       scheduledProcessed += 1;
-      const existingScheduled = await findExistingScheduledFixture(client, {
-        season,
-        date: match.date.toISOString(),
-        home_team: home.id,
-        away_team: away.id,
-      });
-
-      // If an existing scheduled fixture exists, update non-identity fields and skip external_id changes.
-      if (existingScheduled) {
-        scheduledSkipped += 1;
-        const updatePayload = {
-          status: match.status,
-          venue: match.venue,
-          home_score: match.homeScore,
-          away_score: match.awayScore,
-        };
-        const { error } = await client.from('matches').update(updatePayload).eq('id', existingScheduled.id);
-        if (error) {
-          console.warn(`${LOG_PREFIX} Failed to update existing scheduled fixture`, {
-            match: match.date.toISOString(),
-            home: home.code,
-            away: away.code,
-            error,
-          });
-        }
-        console.log(`${LOG_PREFIX} scheduled fixture exists, skipping duplicate external_id`, {
-          date: match.date.toISOString(),
-          home: home.code,
-          away: away.code,
-          existing_external_id: existingScheduled.external_id,
-          incoming_external_id: match.protocolId,
-        });
-        continue;
-      }
-
-      scheduledInsertedOrUpdated += 1;
     }
+
+    const fixtureKey = `${season}|${match.date.toISOString()}|${home.id}|${away.id}`;
+    if (existingFixtureKeys.has(fixtureKey)) {
+      updated += 1;
+    } else {
+      inserted += 1;
+    }
+    existingFixtureKeys.add(fixtureKey);
 
     const fallbackExternalId = `${match.date.toISOString()}|${normalize(match.homeName)}|${normalize(match.awayName)}|${seasonCode}`;
     const externalId = match.protocolId ?? fallbackExternalId;
@@ -310,25 +273,31 @@ async function upsertMatches(
   }
 
   if (!rowsToUpsert.length) {
-    return { upserted: 0, skipped };
+    return { upserted: 0, inserted, updated, skipped, scheduledProcessed };
   }
 
-  const { error, count } = await client
+  const { data, error, count } = await client
     .from('matches')
-    .upsert(rowsToUpsert, { onConflict: 'external_id', ignoreDuplicates: false })
+    .upsert(rowsToUpsert, { onConflict: 'season,date,home_team,away_team', ignoreDuplicates: false })
     .select('id', { count: 'exact' });
 
   if (error) {
     throw error;
   }
 
-  console.log(`${LOG_PREFIX} Upserted ${count ?? rowsToUpsert.length} rows`);
+  const upsertedCount = data?.length ?? count ?? rowsToUpsert.length;
+  console.log(`${LOG_PREFIX} Upserted rows`, {
+    inserted_or_updated: upsertedCount,
+    attempted: rowsToUpsert.length,
+    inserted_estimate: inserted,
+    updated_estimate: updated,
+  });
   return {
-    upserted: count ?? rowsToUpsert.length,
+    upserted: upsertedCount,
+    inserted,
+    updated,
     skipped,
     scheduledProcessed,
-    scheduledSkipped,
-    scheduledInsertedOrUpdated,
   };
 }
 
@@ -475,6 +444,7 @@ async function main(): Promise<void> {
   }
 
   console.log(`${LOG_PREFIX} Total raw rows fetched across months: ${combinedAaDataCount}`);
+  console.log(`${LOG_PREFIX} Total fetched from LFS`, { rows: combinedAaDataCount });
 
   if (!allCalendarRows.length) {
     console.warn(`${LOG_PREFIX} No calendar rows parsed; exiting`);
@@ -502,10 +472,10 @@ async function main(): Promise<void> {
 
   const {
     upserted,
+    inserted,
+    updated,
     skipped,
     scheduledProcessed,
-    scheduledSkipped,
-    scheduledInsertedOrUpdated,
   } = await upsertMatches(
     supa.client,
     parsedMatches,
@@ -515,13 +485,24 @@ async function main(): Promise<void> {
     teams,
   );
 
+  const { count: pastScheduledCount, error: pastScheduledError } = await supa.client
+    .from('matches')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'scheduled')
+    .lt('date', new Date().toISOString());
+  if (pastScheduledError) {
+    console.warn(`${LOG_PREFIX} Failed to count past scheduled matches`, pastScheduledError);
+  } else {
+    console.log(`${LOG_PREFIX} Past scheduled matches after ingest`, { count: pastScheduledCount ?? 0 });
+  }
+
   const finishedCount = parsedMatches.filter((m) => m.status === 'finished').length;
   const scheduledCount = parsedMatches.filter((m) => m.status === 'scheduled').length;
   const withProtocolCount = parsedMatches.filter((m) => Boolean(m.protocolId)).length;
   const withoutProtocolCount = parsedMatches.length - withProtocolCount;
 
   console.log(
-    `${LOG_PREFIX} Summary: total_raw_rows=${combinedAaDataCount}, unique_rows=${calendarRows.length}, parsed=${parsedMatches.length}, upserted=${upserted}, skipped=${skipped}, finished=${finishedCount}, scheduled=${scheduledCount}, protocolLinks=${withProtocolCount}, withoutProtocol=${withoutProtocolCount}, scheduled_processed=${scheduledProcessed}, scheduled_skipped=${scheduledSkipped}, scheduled_inserted_or_updated=${scheduledInsertedOrUpdated}`,
+    `${LOG_PREFIX} Summary: total_raw_rows=${combinedAaDataCount}, unique_rows=${calendarRows.length}, parsed=${parsedMatches.length}, upserted=${upserted}, inserted_estimate=${inserted}, updated_estimate=${updated}, skipped=${skipped}, finished=${finishedCount}, scheduled=${scheduledCount}, protocolLinks=${withProtocolCount}, withoutProtocol=${withoutProtocolCount}, scheduled_processed=${scheduledProcessed}`,
   );
 
   const examples = parsedMatches.slice(0, 3).map((m) => {
