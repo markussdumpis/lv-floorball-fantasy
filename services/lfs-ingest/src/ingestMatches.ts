@@ -75,7 +75,11 @@ function parseDateTime(rawDate: string | null, rawTime: string | null, seasonYea
   const hour = timeMatch ? Number.parseInt(timeMatch[1], 10) : 0;
   const minute = timeMatch ? Number.parseInt(timeMatch[2], 10) : 0;
 
-  const year = parsedYear && parsedYear < 100 ? 2000 + parsedYear : parsedYear ?? Number.parseInt(seasonYear, 10);
+  const seasonStartYear = Number.parseInt(seasonYear.split('-')[0], 10);
+  const inferredYear =
+    parsedYear && parsedYear < 100 ? 2000 + parsedYear : parsedYear ?? (!Number.isNaN(seasonStartYear) ? seasonStartYear + (month <= 7 ? 1 : 0) : NaN);
+
+  const year = inferredYear;
   if (!Number.isFinite(year)) return null;
 
   return new Date(Date.UTC(year, month - 1, day, hour, minute));
