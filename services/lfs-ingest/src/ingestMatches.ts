@@ -48,7 +48,7 @@ function normalizeCode(value: string | null | undefined): string {
 
 function parseArgs(): { season: string; league: string } {
   const args = process.argv.slice(2);
-  const defaults = { season: '2025', league: 'vv' };
+  const defaults = { season: '2025-26', league: 'vv' };
 
   return args.reduce(
     (acc, arg) => {
@@ -466,6 +466,7 @@ async function main(): Promise<void> {
   const parsedMatches = buildParsedMatches(calendarRows);
   console.log(`${LOG_PREFIX} Parsed rows`, { parsed: parsedMatches.length, noProtocolCount: totalNoProtocolCount });
   console.log(`${LOG_PREFIX} Rows without protocol link: ${totalNoProtocolCount}`);
+  console.log(`${LOG_PREFIX} Matches fetched`, { total: parsedMatches.length });
 
   const teams = await loadTeams(supa.client);
   console.log(`${LOG_PREFIX} Loaded ${teams.length} teams for mapping`);
@@ -485,10 +486,13 @@ async function main(): Promise<void> {
     teams,
   );
 
+  console.log(`${LOG_PREFIX} Matches written`, { written: upserted });
+
   const { count: pastScheduledCount, error: pastScheduledError } = await supa.client
     .from('matches')
     .select('id', { count: 'exact', head: true })
     .eq('status', 'scheduled')
+    .eq('season', '2025-26')
     .lt('date', new Date().toISOString());
   if (pastScheduledError) {
     console.warn(`${LOG_PREFIX} Failed to count past scheduled matches`, pastScheduledError);
