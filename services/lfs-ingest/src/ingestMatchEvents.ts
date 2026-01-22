@@ -84,6 +84,7 @@ type ParsedMvp = {
   timeText: string | null;
   jerseyNumber: string | null;
   name: string;
+  raw: string;
 };
 
 type InsertableEvent = {
@@ -197,6 +198,14 @@ function parseTimeToSeconds(raw: string | null): number | null {
   const seconds = Number.parseInt(match[2], 10);
   if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
   return minutes * 60 + seconds;
+}
+
+function inferPeriodFromSeconds(tsSeconds: number | null): number | null {
+  if (tsSeconds === null || !Number.isFinite(tsSeconds)) return null;
+  if (tsSeconds <= 20 * 60) return 1;
+  if (tsSeconds <= 40 * 60) return 2;
+  if (tsSeconds <= 60 * 60) return 3;
+  return 4;
 }
 
 function parseMinutesSeconds(raw: string | null): number | null {
@@ -331,7 +340,7 @@ function parseMvpFromHtml(html: string): ParsedMvp[] {
     const timeMatch = match[0].match(/(\d{1,2}:\d{2})/);
     const timeText = timeMatch ? timeMatch[1] : null;
     if (!name) continue;
-    results.push({ timeText, jerseyNumber, name });
+    results.push({ timeText, jerseyNumber, name, raw: match[0] });
   }
   return results;
 }
@@ -821,16 +830,19 @@ async function ingestSingleMatch(
       continue;
     }
 
+    const tsSeconds = parseTimeToSeconds(mvp.timeText);
+    const period = inferPeriodFromSeconds(tsSeconds);
+
     events.push({
       match_id: match.id,
-      ts_seconds: parseTimeToSeconds(mvp.timeText),
-      period: null,
+      ts_seconds: tsSeconds,
+      period,
       team_id: resolvedTeamId,
       player_id: playerId,
       assist_id: null,
       event_type: 'mvp',
-      value: null,
-      raw: { type: 'mvp', name: mvp.name, jersey: mvp.jerseyNumber },
+      value: 1,
+      raw: { type: 'mvp', name: mvp.name, jersey: mvp.jerseyNumber, raw: mvp.raw },
       external_id: `${match.id}:mvp:${resolvedTeamId}:${playerId}`,
       created_at: new Date().toISOString(),
     });
