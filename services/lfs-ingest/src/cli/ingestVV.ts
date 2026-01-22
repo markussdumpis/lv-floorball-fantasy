@@ -46,7 +46,11 @@ async function fetchFinishedMatches(
 
 function runCli(command: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', env: process.env, cwd: PROJECT_ROOT });
+    const child = spawn(command, args, {
+      cwd: PROJECT_ROOT,
+      env: process.env,
+      stdio: 'inherit',
+    });
     child.on('exit', (code) => {
       if (code === 0) resolve();
       else reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
@@ -191,8 +195,9 @@ async function main() {
       totalEvents += eventCount;
       totalGoalieRows += goalieCount;
 
-      console.log(`[cli] computing points for ${match.id}`);
-      await runCli('npx', ['tsx', 'src/computeMatchPoints.ts', match.id]);
+      console.log(`[cli] computing points matchId=${match.id} ext=${match.external_id ?? ''}`);
+      await runCli('npx', ['tsx', 'src/computeMatchPoints.ts', '--matchId', match.id]);
+      console.log(`[cli] computed points for ${match.id}`);
       const pmpCount = await countPlayerMatchPoints(supa.client, match.id);
       totalPmpRows += pmpCount;
       processed.push(match);
