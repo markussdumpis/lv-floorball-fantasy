@@ -13,6 +13,9 @@ type CalendarRow = {
   protocolId: string | null;
   hasProtocolLink: boolean;
   scoreText: string | null;
+  homeScore: number | null;
+  awayScore: number | null;
+  status: 'finished' | 'scheduled';
 };
 
 type ParsedMatch = {
@@ -98,8 +101,8 @@ function extractProtocolId(href: string | null): string | null {
   if (!href) return null;
   try {
     const url = new URL(href, 'https://www.floorball.lv');
-    // Some proto links include suffixes like "-bsk-ulb"; capture the leading numeric id.
-    const match = url.pathname.match(/\/proto\/(\d+)/);
+    // Capture the full proto slug segment (may include suffixes like "-bsk-ulb").
+    const match = url.pathname.match(/\/proto\/([^\/?#]+)/);
     if (match && match[1]) {
       return match[1];
     }
@@ -114,7 +117,7 @@ function extractProtocolId(href: string | null): string | null {
 
 function extractProtocolIdFromText(text: string | null): string | null {
   if (!text) return null;
-  const match = text.match(/\/proto\/(\d+)/);
+  const match = text.match(/\/proto\/([^\/?#]+)/);
   return match?.[1] ?? null;
 }
 
@@ -124,7 +127,8 @@ function parseAjaxRows(aaData: unknown[], seasonYear: string): { rows: CalendarR
 
   aaData.forEach((entry) => {
     if (!Array.isArray(entry) || entry.length < 6) return;
-    const [dateCell, timeCell, homeCell, resultCell, awayCell, venueCell] = entry as Array<string>;
+    const cells = entry as Array<string>;
+    const [dateCell, timeCell, homeCell, resultCell, awayCell, venueCell] = cells;
 
     const dateText = stripHtml(dateCell);
     const timeText = stripHtml(timeCell);
@@ -138,22 +142,16 @@ function parseAjaxRows(aaData: unknown[], seasonYear: string): { rows: CalendarR
       return;
     }
 
-    const resultHtml = resultCell ?? '';
-    const $ = loadHtml(resultHtml);
-    const linkHref = $('a[href*="/proto/"]').attr('href') ?? null;
-    let protocolId = extractProtocolId(linkHref);
-    if (!protocolId) {
-      const combinedText = [dateCell, timeCell, homeCell, resultCell, awayCell, venueCell].join(' ');
-      const fallbackId = extractProtocolIdFromText(combinedText);
-      if (fallbackId) {
-        protocolId = fallbackId;
-        console.log(`${LOG_PREFIX} protocolId fallback hit`, { protocolId, home: homeText, away: awayText, date: parsedDate.toISOString() });
-      }
-    }
+    const rowHtml = cells.join(' ');
+    const protocolId = extractProtocolId(rowHtml) ?? extractProtocolIdFromText(rowHtml);
     if (!protocolId) {
       noProtocolCount += 1;
     }
-    const scoreText = stripHtml(resultHtml);
+    const resultText = stripHtml(resultCell);
+    const scoreMatch = resultText.match(/(\d+)\s*:\s*(\d+)/);
+    const homeScore = scoreMatch ? Number.parseInt(scoreMatch[1], 10) : null;
+    const awayScore = scoreMatch ? Number.parseInt(scoreMatch[2], 10) : null;
+    const status: 'finished' | 'scheduled' = scoreMatch || protocolId ? 'finished' : 'scheduled';
 
     rows.push({
       date: parsedDate,
@@ -162,7 +160,10 @@ function parseAjaxRows(aaData: unknown[], seasonYear: string): { rows: CalendarR
       venue: venueText || null,
       protocolId,
       hasProtocolLink: Boolean(protocolId),
-      scoreText: scoreText || null,
+      scoreText: resultText || null,
+      homeScore,
+      awayScore,
+      status,
     });
   });
 
@@ -192,19 +193,16 @@ async function loadTeams(client: SupabaseClient): Promise<TeamRow[]> {
 
 function buildParsedMatches(rows: CalendarRow[]): ParsedMatch[] {
   return rows.map((row) => {
-    const protocolId = row.protocolId;
-    const score = parseScore(row.scoreText);
-    const status = score ? 'finished' : 'scheduled';
     return {
       date: row.date,
       homeName: row.homeName,
       awayName: row.awayName,
       venue: row.venue,
-      protocolId,
+      protocolId: row.protocolId,
       resultText: row.scoreText ?? null,
-      status,
-      homeScore: score ? score.home : null,
-      awayScore: score ? score.away : null,
+      status: row.status,
+      homeScore: row.homeScore,
+      awayScore: row.awayScore,
     };
   });
 }
