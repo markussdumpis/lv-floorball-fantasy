@@ -98,7 +98,6 @@ type InsertableEvent = {
   value: number | null;
   raw: unknown;
   created_at: string;
-  external_id?: string;
 };
 
 const LOG_PREFIX = '[ingest:match-events]';
@@ -332,13 +331,13 @@ function parseGoalsFromHtml(html: string): { goals: ParsedGoal[]; penalties: Par
 function parseMvpFromHtml(html: string): ParsedMvp[] {
   const text = cleanText(loadHtml(html).text());
   const results: ParsedMvp[] = [];
-  const regex = /Labākais\s+spēlētājs[^#\d]*(?:#|nr\.?)?(\d{1,3})?\s*([^\n;]+)/gi;
+  const regex =
+    /(\d{1,2}:\d{2})\s+Labākais\s+spēlētājs\s*(?:[^#\d]*(?:#|nr\.?)\s*)?(\d{1,3})?\s*([^\d]{2,80}?)(?=\s+\d{1,2}:\d{2}\s|$)/gi;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {
-    const jerseyNumber = match[1] ? match[1].trim() : null;
-    const name = normalizeWhitespace(match[2] ?? '');
-    const timeMatch = match[0].match(/(\d{1,2}:\d{2})/);
-    const timeText = timeMatch ? timeMatch[1] : null;
+    const timeText = match[1] ? match[1].trim() : null;
+    const jerseyNumber = match[2] ? match[2].trim() : null;
+    const name = normalizeWhitespace(match[3] ?? '');
     if (!name) continue;
     results.push({ timeText, jerseyNumber, name, raw: match[0] });
   }
@@ -842,8 +841,7 @@ async function ingestSingleMatch(
       assist_id: null,
       event_type: 'mvp',
       value: 1,
-      raw: { type: 'mvp', name: mvp.name, jersey: mvp.jerseyNumber, raw: mvp.raw },
-      external_id: `${match.id}:mvp:${resolvedTeamId}:${playerId}`,
+      raw: { type: 'mvp', timeText: mvp.timeText, name: mvp.name, jersey: mvp.jerseyNumber, raw: mvp.raw },
       created_at: new Date().toISOString(),
     });
     mvpInserted += 1;
