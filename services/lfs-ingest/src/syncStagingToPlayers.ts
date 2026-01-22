@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { getEnv } from './env.js';
 import { createSupabase } from './supa.js';
 import type { PlayerSeasonStatsRow, Position } from './types.js';
+import { cleanText } from './html.js';
 
 type TeamRow = {
   id: string;
@@ -23,6 +24,14 @@ type PlayerInsertRow = {
   save_pct?: number | null;
   penalty_min?: number | null;
 };
+
+function normalizeWhitespace(value: string | null | undefined): string {
+  return cleanText(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizePlayerKey(name: string, teamId: string | null): string {
+  return `${normalizeWhitespace(stripHtml(name)).toLowerCase()}|${teamId ?? ''}`;
+}
 
 async function main(): Promise<void> {
   console.log('[sync] Starting sync from players_stats_staging to players…');
@@ -161,31 +170,97 @@ async function main(): Promise<void> {
     return base;
   });
 
-  // Delete all existing players; PostgREST requires a filter.
-  const { data: deletedPlayers, error: deleteError } = await supabase
-    .from('players')
-    .delete()
-    // Use a valid UUID comparison to satisfy PostgREST filter requirement on UUID PK.
-    .neq('id', '00000000-0000-0000-0000-000000000000')
-    .select('id');
+  // Validate and drop junk rows.
+  const droppedSamples: string[] = [];
+  const validRows = rows.filter((row: PlayerSeasonStatsRow) => {
+    const name = normalizeWhitespace(stripHtml(row.name));
+    const gamesValid = row.games !== null && row.games !== undefined && row.games > 0;
+    const looksLikePlayer =
+      name.length > 0 &&
+      !name.startsWith('(') &&
+      !name.endsWith('.') &&
+      name.length <= 80 &&
+      /[\p{L}]/u.test(name) &&
+      /\s/.test(name);
 
-  if (deleteError) {
-    console.error('[sync] Failed to delete existing players', deleteError);
+    const keep = looksLikePlayer && gamesValid;
+    if (!keep && droppedSamples.length < 5) {
+      droppedSamples.push(name || '(empty)');
+    }
+    return keep;
+  });
+
+  console.log(`[sync] Dropped ${rows.length - validRows.length} junk rows from staging`, {
+    samples: droppedSamples,
+  });
+
+  const { data: existingPlayers, error: existingPlayersError } = await supabase
+    .from('players')
+    .select('id, name, team_id');
+  if (existingPlayersError) {
+    console.error('[sync] Failed to load existing players', existingPlayersError);
     return;
   }
 
-  console.log(`[sync] Deleted ${deletedPlayers?.length ?? 0} players from players`);
-
-  const { error: insertPlayersError, count: insertedCount } = await supabase
-    .from('players')
-    .insert(playerRows, { count: 'exact' });
-
-  if (insertPlayersError) {
-    console.error('[sync] Failed to insert players into players', insertPlayersError);
-    return;
+  const existingMap = new Map<string, string>();
+  for (const p of existingPlayers ?? []) {
+    if (!p.id || !p.name) continue;
+    existingMap.set(normalizePlayerKey(p.name, (p as any).team_id ?? null), p.id);
   }
 
-  console.log(`[sync] Inserted ${insertedCount ?? playerRows.length} players into players`);
+  const toUpsert: Array<PlayerInsertRow & { id: string }> = [];
+  const toInsert: PlayerInsertRow[] = [];
+
+  for (const row of validRows) {
+    const teamName = canonicalTeamName(row.team) || null;
+    const teamId = teamName ? teamIdByName.get(teamName) ?? null : null;
+    const key = normalizePlayerKey(row.name, teamId ?? null);
+
+    const base: PlayerInsertRow = {
+      name: row.name,
+      position: normalizePosition(row.position),
+    };
+    if (playerColumns.has('team')) base.team = teamName;
+    if (playerColumns.has('team_id')) base.team_id = teamId;
+    if (playerColumns.has('games')) base.games = row.games;
+    if (playerColumns.has('goals')) base.goals = row.goals;
+    if (playerColumns.has('assists')) base.assists = row.assists;
+    if (playerColumns.has('points')) base.points = row.points ?? 0;
+    if (playerColumns.has('points_total')) base.points_total = row.points ?? 0;
+    if (playerColumns.has('saves')) base.saves = row.saves;
+    if (playerColumns.has('save_pct')) base.save_pct = row.save_pct;
+    if (playerColumns.has('penalty_min')) base.penalty_min = row.penalty_min ?? 0;
+
+    const existingId = existingMap.get(key);
+    if (existingId) {
+      toUpsert.push({ id: existingId, ...base });
+    } else {
+      toInsert.push(base);
+    }
+  }
+
+  console.log(`[sync] Prepared ${toUpsert.length} updates and ${toInsert.length} inserts`);
+
+  if (toUpsert.length) {
+    const { error: upsertError } = await supabase.from('players').upsert(toUpsert, { onConflict: 'id' });
+    if (upsertError) {
+      console.error('[sync] Failed to upsert existing players', upsertError);
+      return;
+    }
+  }
+
+  if (toInsert.length) {
+    const { error: insertPlayersError, count: insertedCount } = await supabase
+      .from('players')
+      .insert(toInsert, { count: 'exact' });
+
+    if (insertPlayersError) {
+      console.error('[sync] Failed to insert new players', insertPlayersError);
+      return;
+    }
+    console.log(`[sync] Inserted ${insertedCount ?? toInsert.length} new players`);
+  }
+
   console.log('[sync] Done syncing players.');
 }
 
