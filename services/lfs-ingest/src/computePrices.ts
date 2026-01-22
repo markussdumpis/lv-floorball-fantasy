@@ -39,7 +39,7 @@ const REPLACEMENT_INDEX: Record<FantasyPosition, number> = {
 const PRICE_RANGE: Record<FantasyPosition, [number, number]> = {
   A: [4, 13],
   D: [3, 14],
-  V: [6, 14],
+  V: [5, 12],
 };
 
 function mapFantasyPosition(dbPos: string | null | undefined): FantasyPosition {
@@ -188,7 +188,7 @@ async function main(): Promise<void> {
       const priceRaw = minPrice + curved * (maxPrice - minPrice);
       let adjusted = priceRaw;
       if (fantasyPosition === 'V') {
-        adjusted *= 1.1;
+        adjusted *= 1.03;
       }
       const clamped = Math.min(maxPrice, Math.max(minPrice, adjusted));
       const computedPrice = Math.round(clamped * 2) / 2; // nearest 0.5
