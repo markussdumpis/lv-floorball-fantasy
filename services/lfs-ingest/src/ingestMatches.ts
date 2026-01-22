@@ -98,10 +98,14 @@ function extractProtocolId(href: string | null): string | null {
   if (!href) return null;
   try {
     const url = new URL(href, 'https://www.floorball.lv');
-    const parts = url.pathname.split('/proto/')[1];
-    if (!parts) return null;
-    const segments = parts.split('/').filter(Boolean);
-    return segments.length ? segments[segments.length - 1] : null;
+    const match = url.pathname.match(/\/proto\/(\d+)/);
+    if (match && match[1]) {
+      return match[1];
+    }
+    if (url.pathname.includes('/proto/')) {
+      console.warn(`${LOG_PREFIX} Failed to extract protocolId from href containing /proto/`, { href });
+    }
+    return null;
   } catch {
     return null;
   }
