@@ -112,6 +112,12 @@ function extractProtocolId(href: string | null): string | null {
   }
 }
 
+function extractProtocolIdFromText(text: string | null): string | null {
+  if (!text) return null;
+  const match = text.match(/\/proto\/(\d+)/);
+  return match?.[1] ?? null;
+}
+
 function parseAjaxRows(aaData: unknown[], seasonYear: string): { rows: CalendarRow[]; noProtocolCount: number } {
   const rows: CalendarRow[] = [];
   let noProtocolCount = 0;
@@ -135,7 +141,15 @@ function parseAjaxRows(aaData: unknown[], seasonYear: string): { rows: CalendarR
     const resultHtml = resultCell ?? '';
     const $ = loadHtml(resultHtml);
     const linkHref = $('a[href*="/proto/"]').attr('href') ?? null;
-    const protocolId = extractProtocolId(linkHref);
+    let protocolId = extractProtocolId(linkHref);
+    if (!protocolId) {
+      const combinedText = [dateCell, timeCell, homeCell, resultCell, awayCell, venueCell].join(' ');
+      const fallbackId = extractProtocolIdFromText(combinedText);
+      if (fallbackId) {
+        protocolId = fallbackId;
+        console.log(`${LOG_PREFIX} protocolId fallback hit`, { protocolId, home: homeText, away: awayText, date: parsedDate.toISOString() });
+      }
+    }
     if (!protocolId) {
       noProtocolCount += 1;
     }
@@ -180,7 +194,7 @@ function buildParsedMatches(rows: CalendarRow[]): ParsedMatch[] {
   return rows.map((row) => {
     const protocolId = row.protocolId;
     const score = parseScore(row.scoreText);
-    const status = score && protocolId ? 'finished' : 'scheduled';
+    const status = score ? 'finished' : 'scheduled';
     return {
       date: row.date,
       homeName: row.homeName,
