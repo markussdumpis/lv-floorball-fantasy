@@ -8,7 +8,6 @@ on:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,14 +22,6 @@ jobs:
       - name: Install dependencies
         working-directory: services/lfs-ingest
         run: npm ci
-
-      - name: Debug scripts
-        working-directory: services/lfs-ingest
-        run: |
-          pwd
-          ls -la
-          cat package.json | sed -n '1,140p'
-          npm run
 
       - name: Run ingest:matches
         working-directory: services/lfs-ingest
