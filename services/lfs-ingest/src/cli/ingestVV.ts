@@ -86,14 +86,18 @@ async function fetchCountsByMatch(
 ): Promise<Map<string, number>> {
   const map = new Map<string, number>();
   if (matchIds.length === 0) return map;
-  const { data, error } = await client.from(table).select('match_id').in('match_id', matchIds);
-  if (error) {
-    throw error;
-  }
-  for (const row of data ?? []) {
-    const id = (row as any).match_id as string | null;
-    if (!id) continue;
-    map.set(id, (map.get(id) ?? 0) + 1);
+  const chunkSize = 500;
+  for (let i = 0; i < matchIds.length; i += chunkSize) {
+    const chunk = matchIds.slice(i, i + chunkSize);
+    const { data, error } = await client.from(table).select('match_id').in('match_id', chunk).limit(10000);
+    if (error) {
+      throw error;
+    }
+    for (const row of data ?? []) {
+      const id = (row as any).match_id as string | null;
+      if (!id) continue;
+      map.set(id, (map.get(id) ?? 0) + 1);
+    }
   }
   return map;
 }
