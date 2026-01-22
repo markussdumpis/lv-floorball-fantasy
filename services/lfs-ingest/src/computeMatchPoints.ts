@@ -54,6 +54,16 @@ type PlayerMatchPointsRow = {
   fantasy_points_bonus: number;
 };
 
+type GoalieStatRow = {
+  match_id: string;
+  player_id: string;
+  team_id: string | null;
+  shots: number | null;
+  saves: number | null;
+  goals_against: number | null;
+  minutes_seconds: number | null;
+};
+
 type MatchRow = {
   id: string;
   home_team: string;
@@ -62,6 +72,8 @@ type MatchRow = {
   away_score: number | null;
   date?: string | null;
 };
+
+const GOALIE_DEBUG_MATCH_ID = 'cfb77194-0cfc-40d3-bbec-6c06c065ece5';
 
 function usage(): never {
   console.error('Usage: npm run compute:match-points -- <match_id> | --all-finished');
@@ -102,9 +114,11 @@ function aggregatePlayerEvents(
   playerMeta?: PlayerMeta,
   teamId?: string,
   assistsOverride: number = 0,
+  goalieStat?: GoalieStatRow | null,
+  winningGoalieId?: string | null,
 ): PlayerMatchPointsRow {
   const normalizedPosition = ((playerMeta?.position as string | undefined)?.toUpperCase() ?? '').trim();
-  const position = normalizedPosition || 'U';
+  const position = normalizedPosition || (goalieStat ? 'V' : 'U');
 
   const isGoalie = position === 'V';
   const isDefender = position === 'A';
@@ -112,7 +126,7 @@ function aggregatePlayerEvents(
   let goals = 0;
   let assists = 0;
   let penMin = 0;
-  let saves = 0;
+  let savesFromEvents = 0;
   let redCards = 0;
   let misconduct10 = 0;
   let penaltyShotScored = 0;
@@ -122,7 +136,7 @@ function aggregatePlayerEvents(
 
   for (const ev of events) {
     if (ev.event_type === 'goal') goals += 1;
-    if (ev.event_type === 'save') saves += 1;
+    if (ev.event_type === 'save') savesFromEvents += 1;
     if (ev.event_type === 'minor_2') {
       penMin += 2;
       minorCount += 1;
@@ -150,13 +164,23 @@ function aggregatePlayerEvents(
   const penaltyPoints = isGoalie ? 0 : minorCount * -0.5 + doubleMinorCount * -2;
   const misconductPoints = isGoalie ? 0 : misconduct10 * -3;
   const redCardPoints = isGoalie ? 0 : redCards * -6;
+  const savesFromStats = goalieStat?.saves;
+  const saves = isGoalie
+    ? typeof savesFromStats === 'number' && Number.isFinite(savesFromStats)
+      ? savesFromStats
+      : savesFromEvents
+    : savesFromEvents;
   const savePoints = isGoalie ? saves * 0.1 : 0;
 
   let goalsAgainst = 0;
-  if (isGoalie && teamId) {
-    const isHome = teamId === match.home_team;
-    const opponentScore = isHome ? awayScore : homeScore;
-    goalsAgainst = opponentScore ?? 0;
+  if (isGoalie) {
+    if (typeof goalieStat?.goals_against === 'number' && Number.isFinite(goalieStat.goals_against)) {
+      goalsAgainst = goalieStat.goals_against ?? 0;
+    } else if (teamId) {
+      const isHome = teamId === match.home_team;
+      const opponentScore = isHome ? awayScore : homeScore;
+      goalsAgainst = opponentScore ?? 0;
+    }
   }
 
   let gaBandPoints = 0;
@@ -171,6 +195,9 @@ function aggregatePlayerEvents(
   const hatTrick = !isGoalie && goals >= 3;
   const winBonus = (() => {
     if (!isGoalie || !teamId) return 0;
+    if (winningGoalieId) {
+      return winningGoalieId === playerId ? 2 : 0;
+    }
     const isHome = teamId === match.home_team;
     const forScore = isHome ? homeScore : awayScore;
     const againstScore = isHome ? awayScore : homeScore;
@@ -259,6 +286,23 @@ async function loadMatchEvents(
   return rows;
 }
 
+async function loadGoalieStats(
+  supabase: ReturnType<typeof createSupabase>['client'],
+  matchId: string,
+): Promise<GoalieStatRow[]> {
+  const { data, error } = await supabase
+    .from('match_goalie_stats')
+    .select('match_id, player_id, team_id, shots, saves, goals_against, minutes_seconds')
+    .eq('match_id', matchId);
+
+  if (error) {
+    console.warn('[points] Failed to load match_goalie_stats', { match_id: matchId, error });
+    return [];
+  }
+
+  return (data ?? []) as GoalieStatRow[];
+}
+
 async function deleteExistingPoints(
   supabase: ReturnType<typeof createSupabase>['client'],
   matchId: string,
@@ -267,6 +311,19 @@ async function deleteExistingPoints(
   if (error) {
     throw error;
   }
+}
+
+function selectWinningGoalie(goalieStats: GoalieStatRow[], match: MatchRow): string | null {
+  const homeScore = Number(match.home_score ?? 0);
+  const awayScore = Number(match.away_score ?? 0);
+  if (homeScore === awayScore) return null;
+  const winnerTeamId = homeScore > awayScore ? match.home_team : match.away_team;
+  const onWinner = goalieStats.filter((g) => g.team_id === winnerTeamId);
+  if (!onWinner.length) return null;
+  const sorted = [...onWinner].sort(
+    (a, b) => Number(b.minutes_seconds ?? 0) - Number(a.minutes_seconds ?? 0),
+  );
+  return sorted[0]?.player_id ?? null;
 }
 
 async function insertPoints(
@@ -308,8 +365,9 @@ async function computeForMatch(
 ): Promise<{ inserted: number; totalPoints: number; skippedNoTeam: number }> {
   const match = await fetchMatch(supabase, matchId);
   const events = await loadMatchEvents(supabase, matchId);
+  const goalieStats = await loadGoalieStats(supabase, matchId);
 
-  if (!events.length) {
+  if (!events.length && !goalieStats.length) {
     return { inserted: 0, totalPoints: 0, skippedNoTeam: 0 };
   }
 
@@ -330,6 +388,9 @@ async function computeForMatch(
   const playerIds = new Set<string>();
   scorerIds.forEach((id) => playerIds.add(id));
   assisterIds.forEach((id) => playerIds.add(id));
+  const eventPlayersCount = playerIds.size;
+  goalieStats.forEach((gs) => playerIds.add(gs.player_id));
+  const goaliePlayersCount = goalieStats.length;
 
   console.log('[points] Player sets', {
     unique_scorers: scorerIds.size,
@@ -354,6 +415,26 @@ async function computeForMatch(
     }
   });
 
+  const goalieStatByPlayer = new Map<string, GoalieStatRow>();
+  goalieStats.forEach((gs) => {
+    goalieStatByPlayer.set(gs.player_id, gs);
+  });
+
+  const winningGoalieId = selectWinningGoalie(goalieStats, match);
+  if (matchId === GOALIE_DEBUG_MATCH_ID) {
+    console.log('[points] Goalie stats parsed', goalieStats);
+    console.log(
+      '[points] Goalie map',
+      Array.from(goalieStatByPlayer.entries()).map(([player_id, g]) => ({
+        player_id,
+        team_id: g.team_id,
+        saves: g.saves,
+        goals_against: g.goals_against,
+        minutes_seconds: g.minutes_seconds,
+      })),
+    );
+  }
+
   for (const playerId of playerIds) {
     const playerEvents = grouped.get(playerId) ?? [];
     const teamIds = Array.from(new Set(playerEvents.map((ev) => ev.team_id).filter((v): v is string => Boolean(v))));
@@ -366,6 +447,15 @@ async function computeForMatch(
       console.warn('[points] TEAM_ID_MISMATCH', { match_id: matchId, player_id: playerId, teamIds });
     } else if (!teamId) {
       teamId = teamByAssistOnly.get(playerId) ?? null;
+    }
+    if (!teamId) {
+      teamId = goalieStatByPlayer.get(playerId)?.team_id ?? null;
+    } else {
+      const goalieTeamId = goalieStatByPlayer.get(playerId)?.team_id ?? null;
+      if (goalieTeamId && goalieTeamId !== teamId) {
+        console.warn('[points] TEAM_ID_MISMATCH_GOALIE', { match_id: matchId, player_id: playerId, teamId, goalieTeamId });
+        teamId = goalieTeamId;
+      }
     }
 
     if (!teamId) {
@@ -382,6 +472,8 @@ async function computeForMatch(
         playerMeta.get(playerId),
         teamId,
         assistCounts.get(playerId) ?? 0,
+        goalieStatByPlayer.get(playerId),
+        winningGoalieId,
       ),
     );
   }
@@ -420,20 +512,29 @@ async function computeForMatch(
   );
 
   const playerMetaById = playerMeta;
-  if (matchId === 'bb4bc04f-56a7-4a48-b7b6-0dfab7286b88') {
-    const ragovskisRow = rows.find((r) => (playerMetaById.get(r.player_id)?.name ?? '').toLowerCase().includes('ragovskis'));
-    if (ragovskisRow) {
-      console.log('[points] Ragovskis row', {
-        player_id: ragovskisRow.player_id,
-        goals: ragovskisRow.goals,
-        assists: ragovskisRow.assists,
-        fantasy_points: ragovskisRow.fantasy_points,
-      });
-    }
-  }
-
   const inserted = await insertPoints(supabase, rows);
   const totalPoints = rows.reduce((sum, row) => sum + row.fantasy_points, 0);
+  if (matchId === GOALIE_DEBUG_MATCH_ID) {
+    const goalieRows = rows.filter((r) => r.position === 'V');
+    console.log(
+      '[points] Goalie rows inserted',
+      goalieRows.map((r) => ({
+        player_id: r.player_id,
+        name: playerMeta.get(r.player_id)?.name ?? null,
+        team_id: r.team_id,
+        saves: r.saves,
+        goals_against: r.goals_against,
+        minutes_seconds: goalieStatByPlayer.get(r.player_id)?.minutes_seconds ?? null,
+        fantasy_points: r.fantasy_points,
+      })),
+    );
+    console.log('[points] Player counts', {
+      eventPlayersCount,
+      goaliePlayersCount,
+      totalPlayers: playerIds.size,
+      insertedGoalies: goalieRows.length,
+    });
+  }
 
   console.log('[points] Position totals', positionTotals);
   console.log(
@@ -493,6 +594,20 @@ async function countEventsForMatch(
   return count ?? 0;
 }
 
+async function countGoalieStatsForMatch(
+  supabase: ReturnType<typeof createSupabase>['client'],
+  matchId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from('match_goalie_stats')
+    .select('player_id', { count: 'exact', head: true })
+    .eq('match_id', matchId);
+  if (error) {
+    throw error;
+  }
+  return count ?? 0;
+}
+
 async function main() {
   const { matchId, allFinished } = parseArgs();
   const env = getEnv();
@@ -506,8 +621,9 @@ async function main() {
 
   if (matchId) {
     const eventCount = await countEventsForMatch(supabase, matchId);
-    console.log(`[points] Match ${matchId} events_count=${eventCount}`);
-    if (eventCount === 0) {
+    const goalieCount = await countGoalieStatsForMatch(supabase, matchId);
+    console.log(`[points] Match ${matchId} events_count=${eventCount} goalie_stats_count=${goalieCount}`);
+    if (eventCount === 0 && goalieCount === 0) {
       console.warn(`[points] SKIPPED_NO_EVENTS match_id=${matchId}`);
       return;
     }
@@ -533,7 +649,8 @@ async function main() {
     console.log(`[points] Processing match ${i + 1}/${matches.length}: ${id}`);
     try {
       const eventCount = await countEventsForMatch(supabase, id);
-      if (eventCount === 0) {
+      const goalieCount = await countGoalieStatsForMatch(supabase, id);
+      if (eventCount === 0 && goalieCount === 0) {
         skippedNoEvents += 1;
         console.warn(`[points] SKIPPED_NO_EVENTS match_id=${id}`);
         continue;

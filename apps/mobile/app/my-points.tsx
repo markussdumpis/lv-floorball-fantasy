@@ -6,7 +6,9 @@ import {
   StyleSheet,
   Text,
   View,
+  TouchableOpacity,
 } from 'react-native';
+import { router } from 'expo-router';
 import { getSupabaseClient } from '../src/lib/supabaseClient';
 
 type PlayerPointsRow = {
@@ -245,7 +247,19 @@ export default function MyPointsScreen() {
   }, [loadPoints]);
 
   const renderItem = ({ item }: { item: PlayerPointsRow }) => (
-    <View style={styles.row}>
+    <TouchableOpacity
+      style={styles.row}
+      onPress={() =>
+        router.push({
+          pathname: '/player-points/[playerId]',
+          params: {
+            playerId: item.playerId,
+            name: item.name,
+            position: item.position ?? undefined,
+          },
+        })
+      }
+    >
       <View style={styles.rowHeader}>
         <Text style={styles.playerName}>
           {item.name} {item.isCaptain ? '(C)' : ''}
@@ -255,7 +269,7 @@ export default function MyPointsScreen() {
       <Text style={styles.subText}>
         Position: {item.position ?? 'Unknown'} • Base: {item.basePoints.toFixed(2)}
       </Text>
-    </View>
+    </TouchableOpacity>
   );
 
   if (loading) {
