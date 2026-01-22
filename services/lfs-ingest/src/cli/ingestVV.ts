@@ -123,8 +123,12 @@ async function main() {
   const env = getEnv();
   const supa = createSupabase(env);
   const season = '2025-26';
+  const args = process.argv.slice(2);
+  const backfill = args.includes('--backfill');
 
   await assertLfsAccess(env);
+
+  console.log(`[cli] mode=${backfill ? 'backfill' : 'incremental'}`);
 
   console.log('[cli] Loading finished matches for season', season);
   const matches = await fetchFinishedMatches(supa.client, season);
@@ -148,9 +152,9 @@ async function main() {
   const missingGoaliesSet = new Set(missingGoalies.map((m) => m.id));
   const recentSet = new Set(recentMatches.map((m) => m.id));
 
-  const matchesNeedingIngest = matches.filter(
-    (m) => missingEventsSet.has(m.id) || missingGoaliesSet.has(m.id) || recentSet.has(m.id),
-  );
+  const matchesNeedingIngest = backfill
+    ? matches
+    : matches.filter((m) => missingEventsSet.has(m.id) || missingGoaliesSet.has(m.id) || recentSet.has(m.id));
 
   console.log('[cli] Selection', {
     total_finished: matches.length,

@@ -2,6 +2,11 @@ name: Ingest VV
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "incremental or backfill"
+        required: true
+        default: "incremental"
   schedule:
     - cron: "0 1 * * *"
 
@@ -51,4 +56,9 @@ jobs:
           LFS_GOALIES_FORM: ${{ secrets.LFS_GOALIES_FORM }}
           LFS_USER_AGENT: ${{ secrets.LFS_USER_AGENT }}
           LFS_COOKIE: ${{ secrets.LFS_COOKIE }}
-        run: npm run ingest:vv
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "backfill" ]; then
+            npm run ingest:vv -- --backfill
+          else
+            npm run ingest:vv
+          fi
