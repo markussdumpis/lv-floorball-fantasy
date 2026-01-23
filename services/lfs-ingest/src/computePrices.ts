@@ -76,6 +76,18 @@ async function fetchCurrentSeason(client: ReturnType<typeof createSupabase>['cli
   return (data as any)?.season ?? null;
 }
 
+function seasonToRange(season: string | null): { start: string | null; end: string | null } {
+  if (!season) return { start: null, end: null };
+  const match = season.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return { start: null, end: null };
+  const startYear = Number(match[1]);
+  const endYear = startYear + 1;
+  return {
+    start: new Date(Date.UTC(startYear, 8, 1, 0, 0, 0)).toISOString(), // Sep 1 start
+    end: new Date(Date.UTC(endYear, 8, 1, 0, 0, 0)).toISOString(), // Sep 1 next year
+  };
+}
+
 function goalieGaBand(goalsAgainstPerGame: number): number {
   if (!Number.isFinite(goalsAgainstPerGame)) {
     return 0;
@@ -119,13 +131,17 @@ async function main(): Promise<void> {
   const supabase = supa.client;
 
   const currentSeason = await fetchCurrentSeason(supabase);
+  const seasonRange = seasonToRange(currentSeason);
 
   let mpQuery = supabase
     .from('player_match_points')
-    .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status, season)')
+    .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status, date)')
     .eq('matches.status', 'finished');
-  if (currentSeason !== null) {
-    mpQuery = mpQuery.eq('matches.season', currentSeason);
+  if (seasonRange.start) {
+    mpQuery = mpQuery.gte('matches.date', seasonRange.start);
+  }
+  if (seasonRange.end) {
+    mpQuery = mpQuery.lt('matches.date', seasonRange.end);
   }
 
   const { data: matchPoints, error: matchPointsError } = await mpQuery;
