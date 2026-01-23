@@ -88,6 +88,19 @@ function seasonToRange(season: string | null): { start: string | null; end: stri
   };
 }
 
+async function fetchAllRows<T>(makeQuery: () => any, pageSize = 1000): Promise<T[]> {
+  const all: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const to = from + pageSize - 1;
+    const { data, error } = await makeQuery().range(from, to);
+    if (error) throw error;
+    const rows = (data ?? []) as T[];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return all;
+}
+
 function goalieGaBand(goalsAgainstPerGame: number): number {
   if (!Number.isFinite(goalsAgainstPerGame)) {
     return 0;
@@ -133,24 +146,29 @@ async function main(): Promise<void> {
   const currentSeason = await fetchCurrentSeason(supabase);
   const seasonRange = seasonToRange(currentSeason);
 
-  let mpQuery = supabase
-    .from('player_match_points')
-    .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status, date)')
-    .eq('matches.status', 'finished');
-  if (seasonRange.start) {
-    mpQuery = mpQuery.gte('matches.date', seasonRange.start);
-  }
-  if (seasonRange.end) {
-    mpQuery = mpQuery.lt('matches.date', seasonRange.end);
-  }
+  const makeMpQuery = () => {
+    let q = supabase
+      .from('player_match_points')
+      .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status, date)')
+      .eq('matches.status', 'finished');
+    if (seasonRange.start) {
+      q = q.gte('matches.date', seasonRange.start);
+    }
+    if (seasonRange.end) {
+      q = q.lt('matches.date', seasonRange.end);
+    }
+    return q;
+  };
 
-  const { data: matchPoints, error: matchPointsError } = await mpQuery;
-
-  if (matchPointsError) {
+  let matchPoints: any[] = [];
+  try {
+    matchPoints = await fetchAllRows<any>(makeMpQuery, 1000);
+  } catch (matchPointsError) {
     console.error('[prices] Failed to load player_match_points', matchPointsError);
     process.exitCode = 1;
     return;
   }
+  console.log('[prices] Loaded player_match_points rows:', matchPoints.length);
 
   type PmpAgg = { games: number; total: number };
   const pmpMap = new Map<string, PmpAgg>();
