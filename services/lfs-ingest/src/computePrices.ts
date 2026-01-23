@@ -120,11 +120,15 @@ async function main(): Promise<void> {
 
   const currentSeason = await fetchCurrentSeason(supabase);
 
-  const { data: matchPoints, error: matchPointsError } = await supabase
+  let mpQuery = supabase
     .from('player_match_points')
     .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status, season)')
-    .eq('matches.status', 'finished')
-    .if(currentSeason !== null, (q) => q.eq('matches.season', currentSeason));
+    .eq('matches.status', 'finished');
+  if (currentSeason !== null) {
+    mpQuery = mpQuery.eq('matches.season', currentSeason);
+  }
+
+  const { data: matchPoints, error: matchPointsError } = await mpQuery;
 
   if (matchPointsError) {
     console.error('[prices] Failed to load player_match_points', matchPointsError);
