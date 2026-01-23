@@ -241,11 +241,12 @@ async function main(): Promise<void> {
       player.fantasyTotalAdjusted = total * weight;
     });
 
-    goalies.sort((a, b) => (b.fantasyTotalAdjusted ?? 0) - (a.fantasyTotalAdjusted ?? 0));
+    // Sort ascending to map percentile directly; higher score ends up with higher percentile.
+    goalies.sort((a, b) => (a.fantasyTotalAdjusted ?? 0) - (b.fantasyTotalAdjusted ?? 0));
     const [minPrice, maxPrice] = [5, 14];
     goalies.forEach((player, index) => {
       const percentile = goalies.length > 1 ? index / (goalies.length - 1) : 0;
-      const priceRaw = minPrice + (1 - percentile) * (maxPrice - minPrice);
+      const priceRaw = minPrice + percentile * (maxPrice - minPrice);
       const clamped = Math.min(maxPrice, Math.max(minPrice, priceRaw));
       const computedPrice = Math.round(clamped * 2) / 2;
       const finalPrice = player.price_manual ?? computedPrice;
