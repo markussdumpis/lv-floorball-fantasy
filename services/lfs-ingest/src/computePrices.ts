@@ -28,6 +28,9 @@ type ComputedPlayer = PlayerRow & {
   fppg: number;
   vorp?: number;
   finalPrice?: number;
+  fantasyGames?: number;
+  fantasyTotal?: number;
+  fantasyTotalAdjusted?: number;
 };
 
 const REPLACEMENT_INDEX: Record<FantasyPosition, number> = {
@@ -56,6 +59,21 @@ function asNumber(value: unknown): number {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function fetchCurrentSeason(client: ReturnType<typeof createSupabase>['client']): Promise<string | null> {
+  const { data, error } = await client
+    .from('matches')
+    .select('season')
+    .not('season', 'is', null)
+    .order('season', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.warn('[prices] Failed to fetch current season; continuing without season filter', error);
+    return null;
+  }
+  return (data as any)?.season ?? null;
 }
 
 function goalieGaBand(goalsAgainstPerGame: number): number {
@@ -100,10 +118,13 @@ async function main(): Promise<void> {
   const supa = createSupabase(env);
   const supabase = supa.client;
 
+  const currentSeason = await fetchCurrentSeason(supabase);
+
   const { data: matchPoints, error: matchPointsError } = await supabase
     .from('player_match_points')
-    .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status)')
-    .eq('matches.status', 'finished');
+    .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status, season)')
+    .eq('matches.status', 'finished')
+    .if(currentSeason !== null, (q) => q.eq('matches.season', currentSeason));
 
   if (matchPointsError) {
     console.error('[prices] Failed to load player_match_points', matchPointsError);
@@ -158,13 +179,15 @@ async function main(): Promise<void> {
       ...(raw as PlayerRow),
       fantasyPosition,
       fppg,
+      fantasyGames: agg?.games ?? 0,
+      fantasyTotal: agg?.total ?? 0,
     });
   }
 
   const updates: { id: string; price_computed: number; price_final: number }[] = [];
   const replacementByPos: Partial<Record<FantasyPosition, number>> = {};
 
-  (['A', 'D', 'V'] satisfies FantasyPosition[]).forEach((fantasyPosition) => {
+  (['A', 'D'] satisfies FantasyPosition[]).forEach((fantasyPosition) => {
     const group = computed[fantasyPosition];
     if (!group.length) return;
 
@@ -203,6 +226,32 @@ async function main(): Promise<void> {
       });
     });
   });
+
+  // Goalie pricing: games-weighted fantasy totals mapped to percentile range 5..14
+  const goalies = computed.V;
+  if (goalies.length) {
+    goalies.forEach((player) => {
+      const games = player.fantasyGames ?? 0;
+      const total = player.fantasyTotal ?? 0;
+      const weight = games > 0 ? games / (games + 5) : 0;
+      player.fantasyTotalAdjusted = total * weight;
+    });
+
+    goalies.sort((a, b) => (b.fantasyTotalAdjusted ?? 0) - (a.fantasyTotalAdjusted ?? 0));
+    const [minPrice, maxPrice] = [5, 14];
+    goalies.forEach((player, index) => {
+      const percentile = goalies.length > 1 ? index / (goalies.length - 1) : 0;
+      const priceRaw = minPrice + (1 - percentile) * (maxPrice - minPrice);
+      const clamped = Math.min(maxPrice, Math.max(minPrice, priceRaw));
+      const computedPrice = Math.round(clamped * 2) / 2;
+      const finalPrice = player.price_manual ?? computedPrice;
+      updates.push({
+        id: player.id,
+        price_computed: computedPrice,
+        price_final: finalPrice,
+      });
+    });
+  }
 
   console.log(`[prices] Processed ${updates.length} players for rank-based VORP pricing`);
   console.log(
