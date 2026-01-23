@@ -156,8 +156,8 @@ function aggregatePlayerEvents(
   const homeScore = Number.isFinite(match.home_score) ? (match.home_score as number) : Number(match.home_score ?? 0);
   const awayScore = Number.isFinite(match.away_score) ? (match.away_score as number) : Number(match.away_score ?? 0);
 
-  const goalWeight = isGoalie ? 0 : isDefender ? 2 : 1.5;
-  const assistWeight = isGoalie ? 0 : isDefender ? 1.5 : 1.0;
+  const goalWeight = isGoalie ? 2 : isDefender ? 2 : 1.5;
+  const assistWeight = isGoalie ? 2 : isDefender ? 1.5 : 1.0;
 
   const goalPoints = goals * goalWeight;
   const totalAssists = assists + assistsOverride;
@@ -526,6 +526,8 @@ async function computeForMatch(
         name: playerMeta.get(r.player_id)?.name ?? null,
         team_id: r.team_id,
         saves: r.saves,
+        assists: r.assists,
+        assist_points: r.assists * 2,
         goals_against: r.goals_against,
         minutes_seconds: goalieStatByPlayer.get(r.player_id)?.minutes_seconds ?? null,
         fantasy_points: r.fantasy_points,

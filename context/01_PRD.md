@@ -115,6 +115,16 @@
 
 ---
 
+## Player Pricing (Current Implementation)
+
+* **Inputs:** Aggregated `player_match_points` joined to `matches` with `status = 'finished'` in the latest finished season window.
+* **Skater score:** Compute FPPG = total / games, apply shrinkage weight `games / (games + 5)` → `fppg_adj`. Replacement FPPG comes from the weighted list per position. VORP = `max(fppg_adj - replacement, 0)`.
+* **Price curve:** Per position range (Attackers 4–13, Defenders 3–14). If `maxVorp` is tiny, all skaters stay at the floor. Otherwise normalize `vorp / maxVorp`, apply curve `x^0.6`, scale into the range, and round to the nearest 0.5. Manual overrides (`price_manual`) still win: `price_final = price_manual ?? price_computed`.
+* **Goalies:** Priced separately using goalie scoring/adjusted totals; logic unchanged from existing goalie flow.
+* **When it runs:** After ingest/backfill of match points; scheduled nightly as part of the ingest job so the `players` table and `public_players` view stay in sync.
+
+---
+
 ## 5. Data Pipeline (MVP)
 
 1. Scrape data from LFS site (match results, stats tables).

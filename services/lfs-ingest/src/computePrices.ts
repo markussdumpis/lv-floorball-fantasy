@@ -3,7 +3,6 @@ import { getEnv } from './env.js';
 import { createSupabase } from './supa.js';
 
 type FantasyPosition = 'A' | 'D' | 'V';
-const MIN_GAMES = 5;
 
 type PlayerRow = {
   id: string;
@@ -28,27 +27,30 @@ type ComputedPlayer = PlayerRow & {
   fppg: number;
   vorp?: number;
   finalPrice?: number;
+  computedPrice?: number;
+  fppgAdjusted?: number;
   fantasyGames?: number;
   fantasyTotal?: number;
   fantasyTotalAdjusted?: number;
 };
 
-const REPLACEMENT_INDEX: Record<FantasyPosition, number> = {
-  A: 9, // 10th attacker
-  D: 7, // 8th defender
-  V: 2, // 3rd goalie
+const PRICE_RANGE: Record<FantasyPosition, [number, number]> = {
+  A: [4.5, 13], // attackers (U)
+  D: [4.0, 14], // defenders (A)
+  V: [5, 12],   // goalies unchanged
 };
 
-const PRICE_RANGE: Record<FantasyPosition, [number, number]> = {
-  A: [4, 13],
-  D: [3, 14],
-  V: [5, 12],
-};
+const UNKNOWN_POSITION_LOGGED = new Set<string>();
 
 function mapFantasyPosition(dbPos: string | null | undefined): FantasyPosition {
-  if (dbPos === 'A') return 'D'; // DB defender -> fantasy defender
-  if (dbPos === 'V') return 'V'; // goalie
-  // default and 'U' -> attacker
+  const norm = (dbPos ?? '').toUpperCase();
+  if (norm.startsWith('V')) return 'V';
+  if (norm.startsWith('A')) return 'D';
+  if (norm.startsWith('U')) return 'A';
+  if (!UNKNOWN_POSITION_LOGGED.has(norm)) {
+    UNKNOWN_POSITION_LOGGED.add(norm);
+    console.warn('[prices] Unknown position; defaulting to attacker', { raw: dbPos });
+  }
   return 'A';
 }
 
@@ -59,6 +61,24 @@ function asNumber(value: unknown): number {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function median(values: number[]): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function percentile(values: number[], p: number): number {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = (sorted.length - 1) * p;
+  const lower = Math.floor(idx);
+  const upper = Math.ceil(idx);
+  if (lower === upper) return sorted[lower];
+  const weight = idx - lower;
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight;
 }
 
 async function fetchCurrentSeason(client: ReturnType<typeof createSupabase>['client']): Promise<string | null> {
@@ -149,7 +169,7 @@ async function main(): Promise<void> {
   const makeMpQuery = () => {
     let q = supabase
       .from('player_match_points')
-      .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status, date)')
+      .select('player_id, match_id, fantasy_points, fantasy_points_bonus, matches!inner(status, season, date)')
       .eq('matches.status', 'finished');
     if (seasonRange.start) {
       q = q.gte('matches.date', seasonRange.start);
@@ -210,8 +230,7 @@ async function main(): Promise<void> {
     const fantasyPosition = mapFantasyPosition((raw as PlayerRow).position ?? null);
     const agg = pmpMap.get(raw.id);
     const games = agg?.games ?? 0;
-    const fppg =
-      games >= MIN_GAMES ? (agg?.total ?? 0) / games : games > 0 ? (agg?.total ?? 0) / games : 0;
+    const fppg = games > 0 ? (agg?.total ?? 0) / games : 0;
 
     computed[fantasyPosition].push({
       ...(raw as PlayerRow),
@@ -223,38 +242,59 @@ async function main(): Promise<void> {
   }
 
   const updates: { id: string; price_computed: number; price_final: number }[] = [];
-  const replacementByPos: Partial<Record<FantasyPosition, number>> = {};
 
+  // Skater pricing (MVP):
+  // - attackers: sqrt(total + 6) with logistic soft-cap to avoid max-price pile
+  // - defenders: sqrt(total + 18) + 15% premium (scarcer slots)
+  // - goalies: separate logic below (do not touch without approval)
   (['A', 'D'] satisfies FantasyPosition[]).forEach((fantasyPosition) => {
     const group = computed[fantasyPosition];
     if (!group.length) return;
 
-    group.sort((a, b) => b.fppg - a.fppg);
-    const replacementIdx = Math.min(REPLACEMENT_INDEX[fantasyPosition], group.length - 1);
-    const replacementFppg = group[replacementIdx]?.fppg ?? 0;
-    replacementByPos[fantasyPosition] = replacementFppg;
-
-    // Compute VORP relative to replacement and then rank by VORP.
-    group.forEach((player) => {
-      player.vorp = Math.max(player.fppg - replacementFppg, 0);
-    });
-
-    group.sort((a, b) => (b.vorp ?? 0) - (a.vorp ?? 0));
     const [minPrice, maxPrice] = PRICE_RANGE[fantasyPosition];
 
-    group.forEach((player, index) => {
-      const p = group.length > 1 ? index / (group.length - 1) : 0;
-      const inv = 1 - p;
-      const curved = Math.pow(inv, 0.8);
-      const priceRaw = minPrice + curved * (maxPrice - minPrice);
-      let adjusted = priceRaw;
-      if (fantasyPosition === 'V') {
-        adjusted *= 1.03;
-      }
-      const clamped = Math.min(maxPrice, Math.max(minPrice, adjusted));
-      const computedPrice = Math.round(clamped * 2) / 2; // nearest 0.5
-      const finalPrice = player.price_manual ?? computedPrice;
+    const priced = [...group].sort((a, b) => {
+      const totalDiff = (b.fantasyTotal ?? 0) - (a.fantasyTotal ?? 0);
+      if (totalDiff !== 0) return totalDiff;
+      const gamesDiff = (b.fantasyGames ?? 0) - (a.fantasyGames ?? 0);
+      if (gamesDiff !== 0) return gamesDiff;
+      return (a.name ?? '').localeCompare(b.name ?? '');
+    });
 
+    priced.forEach((player) => {
+      const total = asNumber(player.fantasyTotal ?? 0);
+      const OFFSET_A = 6;
+      const OFFSET_D = 18;
+      const offset = fantasyPosition === 'D' ? OFFSET_D : OFFSET_A;
+
+      const effective = Math.sqrt(Math.max(0, total) + offset);
+
+      const divisor = fantasyPosition === 'A' ? 0.55 : 0.70; // A=attackers(U), D=defenders(A)
+      let computedPrice = effective / divisor;
+
+      const span = maxPrice - minPrice;
+      if (fantasyPosition === 'A' && span > 0) {
+        const alpha = 0.35;
+        const x = Math.max(0, computedPrice - minPrice);
+        const t = 1 - Math.exp(-alpha * x); // 0..1 (approaches 1)
+        computedPrice = minPrice + t * span;
+      } else if (span > 0) {
+        const t = Math.min(1, Math.max(0, (computedPrice - minPrice) / span));
+        const tCurved = Math.pow(t, 1.25); // >1 compresses the top end (defenders keep prior behavior)
+        computedPrice = minPrice + tCurved * span;
+      }
+
+      // defender premium: defenders are scarcer slots, make them slightly more expensive
+      if (fantasyPosition === 'D') {
+        computedPrice = computedPrice * 1.15;
+      }
+
+      computedPrice = Math.min(maxPrice, Math.max(minPrice, computedPrice));
+      computedPrice = Math.round(computedPrice * 2) / 2;
+
+      const finalPrice = player.price_manual ?? computedPrice;
+      player.fantasyTotalAdjusted = total;
+      player.computedPrice = computedPrice;
       player.finalPrice = finalPrice;
 
       updates.push({
@@ -263,6 +303,19 @@ async function main(): Promise<void> {
         price_final: finalPrice,
       });
     });
+
+    const topPreview = priced.slice(0, 10).map((p) => ({
+      name: p.name ?? 'Unknown',
+      games: p.fantasyGames ?? 0,
+      fppg: (p.fppg ?? 0).toFixed(2),
+      total: (p.fantasyTotal ?? 0).toFixed(1),
+      price: (p.finalPrice ?? 0).toFixed(1),
+    }));
+    console.log(
+      `[prices] Skater ${fantasyPosition} count=${group.length} top=${topPreview
+        .map((t) => `${t.name}:${t.games}g fppg=${t.fppg} total=${t.total} @${t.price}`)
+        .join(', ')}`,
+    );
   });
 
   // Goalie pricing: games-weighted fantasy totals mapped to percentile range 5..14
@@ -292,17 +345,12 @@ async function main(): Promise<void> {
     });
   }
 
-  console.log(`[prices] Processed ${updates.length} players for rank-based VORP pricing`);
-  console.log(
-    `[prices] Replacement FPPG -> A: ${replacementByPos.A?.toFixed(2) ?? 'n/a'}, D: ${
-      replacementByPos.D?.toFixed(2) ?? 'n/a'
-    }, V: ${replacementByPos.V?.toFixed(2) ?? 'n/a'}`,
-  );
+  console.log(`[prices] Processed ${updates.length} players for pricing`);
 
   for (const row of updates) {
     const { error: updateError } = await supabase
       .from('players')
-      .update({ price_computed: row.price_computed, price_final: row.price_final })
+      .update({ price_computed: row.price_computed, price_final: row.price_final, price: Math.round(row.price_final) })
       .eq('id', row.id);
 
     if (updateError) {
@@ -322,12 +370,39 @@ async function main(): Promise<void> {
     const finals = group.map((p) => p.finalPrice ?? 0);
     const min = Math.min(...finals).toFixed(1);
     const max = Math.max(...finals).toFixed(1);
-    console.log(
-      `[prices] ${fantasyPosition} count=${group.length} top fppg=${group[0]?.fppg.toFixed(
-        2,
-      )} replacement=${replacementByPos[fantasyPosition]?.toFixed(2) ?? 'n/a'} price range ${min}-${max}`,
-    );
+    console.log(`[prices] ${fantasyPosition} count=${group.length} top fppg=${group[0]?.fppg.toFixed(2)} price range ${min}-${max}`);
   });
+
+  const logTopSkaters = (pos: FantasyPosition) => {
+    if (pos === 'V') return;
+    const group = computed[pos];
+    if (!group.length) return;
+    const top = [...group]
+      .sort((a, b) => (b.fantasyTotalAdjusted ?? 0) - (a.fantasyTotalAdjusted ?? 0))
+      .slice(0, 10)
+      .map((p) => `${p.name ?? 'Unknown'}:${(p.fantasyTotalAdjusted ?? 0).toFixed(2)}@${(p.finalPrice ?? 0).toFixed(1)}`);
+    console.log(`[prices] Top ${pos} fppg_adj -> price:`, top);
+  };
+  logTopSkaters('A');
+  logTopSkaters('D');
+
+  const skaters = [...computed.A, ...computed.D];
+  if (skaters.length) {
+    const expensiveLowTotal = [...skaters]
+      .sort(
+        (a, b) =>
+          (b.finalPrice ?? 0) - (a.finalPrice ?? 0) ||
+          (a.fantasyTotal ?? 0) - (b.fantasyTotal ?? 0),
+      )
+      .slice(0, 10)
+      .map(
+        (p) =>
+          `${p.name ?? 'Unknown'}:${(p.finalPrice ?? 0).toFixed(1)} pts=${(p.fantasyTotal ?? 0).toFixed(
+            1,
+          )} vorp=${(p.vorp ?? 0).toFixed(2)}`,
+      );
+    console.log('[prices] Expensive skaters with lowest totals:', expensiveLowTotal);
+  }
 
   const samplePlayers = Object.values(computed)
     .flat()

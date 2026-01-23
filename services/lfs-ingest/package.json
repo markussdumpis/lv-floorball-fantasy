@@ -12,6 +12,7 @@
     "scrape:match": "tsx src/scrapeMatchProtocol.ts",
     "ingest:matches": "tsx src/ingestMatches.ts",
     "ingest:match-events": "tsx src/ingestMatchEvents.ts",
+    "cleanup:junk-players": "tsx src/cleanupJunkPlayers.ts",
     "typecheck": "tsc --noEmit",
     "compute:match-points:all": "tsx src/computeMatchPoints.ts --all-finished",
     "ingest:vv": "tsx src/cli/ingestVV.ts"

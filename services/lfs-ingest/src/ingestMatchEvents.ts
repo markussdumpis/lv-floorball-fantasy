@@ -1,4 +1,4 @@
-import type { CheerioAPI, Element } from 'cheerio';
+import type { CheerioAPI } from 'cheerio';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeFile } from 'node:fs/promises';
 import { getEnv } from './env.js';
@@ -21,6 +21,7 @@ type TeamRow = {
   id: string;
   name: string | null;
   code: string | null;
+  short_name?: string | null;
 };
 
 type PlayerRow = {
@@ -92,7 +93,7 @@ type InsertableEvent = {
   ts_seconds: number | null;
   period: number | null;
   team_id: string;
-  player_id: string;
+  player_id: string | null;
   assist_id: string | null;
   event_type: 'goal' | 'minor_2' | 'double_minor' | 'misconduct_10' | 'red_card' | 'mvp';
   value: number | null;
@@ -126,6 +127,46 @@ function normalizeName(value: string | null | undefined): string {
   const withoutParens = stripParentheses(value);
   const withoutJersey = stripJerseyNumber(withoutParens);
   return normalizeWhitespace(withoutJersey).toLowerCase();
+}
+
+function normalizeKey(text: string | null | undefined): string {
+  const cleaned = normalizeWhitespace(text);
+  const trimmed = cleaned.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, '');
+  return trimmed
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildNonPlayerAssistSet(teams: TeamRow[]): Set<string> {
+  const set = new Set<string>();
+  teams.forEach((team) => {
+    [team.name, team.code, team.short_name].forEach((val) => {
+      const key = normalizeKey(val);
+      if (key) set.add(key);
+    });
+  });
+  const ignored = [
+    'aiztureta soda laika',
+    'aizturēta soda laikā',
+    'vienados nepilnos sastavos',
+    'vienādos nepilnos sastāvos',
+  ];
+  ignored.forEach((phrase) => {
+    const key = normalizeKey(phrase);
+    if (key) set.add(key);
+  });
+  return set;
+}
+
+function isNonPlayerAssistText(text: string | null | undefined, nonPlayerSet: Set<string>): boolean {
+  const normalized = normalizeKey(text);
+  if (!normalized) return true;
+  if (text?.trim().startsWith('(')) return true;
+  if (nonPlayerSet.has(normalized)) return true;
+  return false;
 }
 
 function normalize(value: string | null | undefined): string {
@@ -412,12 +453,35 @@ async function fetchMatch(client: ReturnType<typeof createSupabase>['client'], m
 async function fetchTeams(
   client: ReturnType<typeof createSupabase>['client'],
   ids: string[],
+  selectCols: string,
 ): Promise<TeamRow[]> {
-  const { data, error } = await client.from('teams').select('id, name, code').in('id', ids);
+  const { data, error } = await client.from('teams').select(selectCols).in('id', ids);
   if (error) {
     throw error;
   }
-  return (data ?? []) as TeamRow[];
+  return (data ?? []) as unknown as TeamRow[];
+}
+
+async function fetchAllTeams(
+  client: ReturnType<typeof createSupabase>['client'],
+  selectCols: string,
+): Promise<TeamRow[]> {
+  const { data, error } = await client.from('teams').select(selectCols);
+  if (error) {
+    throw error;
+  }
+  return (data ?? []) as unknown as TeamRow[];
+}
+
+async function resolveTeamSelect(client: ReturnType<typeof createSupabase>['client']): Promise<string> {
+  const { data, error } = await client.from('teams').select('*').limit(1);
+  if (error) {
+    console.warn(`${LOG_PREFIX} Failed to inspect teams schema, defaulting without short_name`, error);
+    return 'id, name, code';
+  }
+  const sample = (data ?? [])[0] as Record<string, unknown> | undefined;
+  const hasShortName = sample ? Object.prototype.hasOwnProperty.call(sample, 'short_name') : false;
+  return hasShortName ? 'id, name, code, short_name' : 'id, name, code';
 }
 
 async function fetchPlayers(
@@ -522,50 +586,6 @@ function mapPlayerIdAnyTeam(name: string | null, playerIndex: Map<string, string
     return matches[0];
   }
   return null;
-}
-
-async function ensureStubPlayer(
-  client: SupabaseClient,
-  teamId: string,
-  canonicalName: string,
-  normalizedName: string,
-  playerIndex: Map<string, string>,
-  logLabel:
-    | 'CREATED_STUB_PLAYER'
-    | 'CREATED_STUB_PLAYER_ASSIST'
-    | 'CREATED_STUB_PLAYER_PENALTY' = 'CREATED_STUB_PLAYER',
-  reason: 'protocol_unmapped' | 'protocol_unmapped_assist' | 'protocol_unmapped_penalty' = 'protocol_unmapped',
-): Promise<string | null> {
-  const existing = playerIndex.get(`${teamId}:${normalizedName}`);
-  if (existing) {
-    return existing;
-  }
-
-  const { data, error } = await client
-    .from('players')
-    .insert(
-      {
-        name: canonicalName,
-        team_id: teamId,
-        position: 'U',
-      },
-      { defaultToNull: false },
-    )
-    .select('id')
-    .single();
-
-  if (error || !data?.id) {
-    console.warn(`${LOG_PREFIX} Failed to create stub player`, { error, canonicalName, teamId });
-    return null;
-  }
-
-  playerIndex.set(`${teamId}:${normalizedName}`, data.id);
-  console.log(`${LOG_PREFIX} ${logLabel}`, {
-    team_id: teamId,
-    canonicalName,
-    reason,
-  });
-  return data.id;
 }
 
 function resolveGoalieTeamId(teamLabel: string | null, teams: TeamRow[], homeId: string, awayId: string): string | null {
@@ -731,7 +751,16 @@ async function ingestSingleMatch(
   console.log(`${LOG_PREFIX} MVP parsed: ${parsedMvps.length}`);
   const goalieRawLines = cleanText(loadHtml(html).text()).match(/v\u0101rtsarga stat[^;]+/gi) ?? [];
 
-  const teams = await fetchTeams(supa.client, [match.home_team, match.away_team]);
+  const teamSelectCols = await resolveTeamSelect(supa.client);
+  const allTeams = await fetchAllTeams(supa.client, teamSelectCols);
+  const teamsById = new Map(allTeams.map((t) => [t.id, t]));
+  const teams = [match.home_team, match.away_team]
+    .map((id) => teamsById.get(id))
+    .filter((t): t is TeamRow => Boolean(t));
+  if (teams.length < 2) {
+    teams.push(...(await fetchTeams(supa.client, [match.home_team, match.away_team], teamSelectCols)));
+  }
+  const nonPlayerAssistSet = buildNonPlayerAssistSet(allTeams);
   const players = await fetchPlayers(supa.client, [match.home_team, match.away_team]);
   const playerIndex = buildPlayerIndex(players);
 
@@ -854,79 +883,59 @@ async function ingestSingleMatch(
       continue;
     }
 
+    const detailsTextLower = (goal.detailsText ?? '').toLowerCase();
+    if (detailsTextLower.includes('bumbiņa savos vārtos')) {
+      console.warn(`${LOG_PREFIX} IGNORED_OWN_GOAL_ROW`, { match_id: match.id, raw_row: goal.detailsText });
+      continue;
+    }
+
     let scorerId = mapPlayerId(goal.scorerNormalized, teamId, playerIndex);
     if (!scorerId) {
-      const jersey = extractJerseyNumber(goal.scorerRaw);
-      const cleanName = normalizeWhitespace(stripJerseyNumber(goal.scorerRaw));
-      const canonicalName = cleanName ? (jersey ? `${cleanName} #${jersey}` : cleanName) : '';
-      const normalizedCanonical = normalizeName(canonicalName);
-
       const candidates = Array.from(playerIndex.entries())
         .filter(([key]) => key.startsWith(`${teamId}:`))
         .map(([key]) => key.split(':')[1])
         .slice(0, 5);
 
-      scorerId =
-        canonicalName && normalizedCanonical
-          ? await ensureStubPlayer(supa.client, teamId, canonicalName, normalizedCanonical, playerIndex)
-          : null;
-
-      if (scorerId) {
-        stubCreatedScorerCount += 1;
-      } else {
-        unmappedPlayers.add(`${teamId}:${goal.scorerNormalized ?? 'unknown'}`);
-        console.warn(`${LOG_PREFIX} UNMAPPED_PLAYER scorer`, {
-          team_id: teamId,
-          raw: goal.scorerRaw,
-          normalized: goal.scorerNormalized,
-          raw_row: goal.detailsText,
-          candidates,
-        });
-        continue;
-      }
+      unmappedPlayers.add(`${teamId}:${goal.scorerNormalized ?? 'unknown'}`);
+      console.warn(`${LOG_PREFIX} UNMAPPED_PLAYER scorer`, {
+        team_id: teamId,
+        raw: goal.scorerRaw,
+        normalized: goal.scorerNormalized,
+        raw_row: goal.detailsText,
+        candidates,
+      });
+      continue;
     }
 
     let assistId: string | null = null;
-    if (goal.assistNormalized) {
+    let assistIgnoredReason: string | undefined;
+    if (detailsTextLower.includes('bumbiņa savos vārtos')) {
+      assistIgnoredReason = 'own_goal';
+      assistId = null;
+      console.warn(`${LOG_PREFIX} IGNORED_ASSIST_TEXT`, { match_id: match.id, raw: goal.assistRaw, reason: 'own_goal' });
+    } else if (isNonPlayerAssistText(goal.assistRaw, nonPlayerAssistSet)) {
+      assistIgnoredReason = 'non_player_assist_text';
+      console.warn(`${LOG_PREFIX} IGNORED_ASSIST_TEXT`, { match_id: match.id, raw: goal.assistRaw });
+    } else if (goal.assistNormalized) {
       assistId = mapPlayerId(goal.assistNormalized, teamId, playerIndex);
       if (!assistId) {
-        const jersey = extractJerseyNumber(goal.assistRaw);
-        const cleanName = normalizeWhitespace(stripJerseyNumber(goal.assistRaw));
-        const canonicalName = cleanName ? (jersey ? `${cleanName} #${jersey}` : cleanName) : '';
-        const normalizedCanonical = normalizeName(canonicalName);
-
         const candidates = Array.from(playerIndex.entries())
           .filter(([key]) => key.startsWith(`${teamId}:`))
           .map(([key]) => key.split(':')[1])
           .slice(0, 5);
 
-        if (canonicalName && normalizedCanonical) {
-          assistId = await ensureStubPlayer(
-            supa.client,
-            teamId,
-            canonicalName,
-            normalizedCanonical,
-            playerIndex,
-            'CREATED_STUB_PLAYER_ASSIST',
-            'protocol_unmapped_assist',
-          );
-          if (assistId) {
-            stubCreatedAssistCount += 1;
-          }
-        }
-
-        if (!assistId) {
-          unmappedAssistCount += 1;
-          console.warn(`${LOG_PREFIX} UNMAPPED_ASSIST`, {
-            team_id: teamId,
-            raw: goal.assistRaw,
-            normalized: goal.assistNormalized,
-            raw_row: goal.detailsText,
-            candidates,
-          });
-        }
+        unmappedAssistCount += 1;
+        console.warn(`${LOG_PREFIX} UNMAPPED_ASSIST`, {
+          team_id: teamId,
+          raw: goal.assistRaw,
+          normalized: goal.assistNormalized,
+          raw_row: goal.detailsText,
+          candidates,
+        });
       }
     }
+    // Regression note: ingesting matches 0a87bee6-c8d3-42c0-8692-f42bbc651a0f and b8a382d9-f571-4d25-a229-5077447d3941
+    // should log IGNORED_ASSIST_TEXT for "FBK SĀC" assists and must not create new players.
 
     events.push({
       match_id: match.id,
@@ -944,6 +953,7 @@ async function ingestSingleMatch(
         detailsText: goal.detailsText,
         scorer_raw: goal.scorerRaw,
         assist_raw: goal.assistRaw,
+        ...(assistIgnoredReason ? { assist_ignored_reason: assistIgnoredReason } : {}),
       },
       created_at: new Date().toISOString(),
     });
@@ -985,43 +995,21 @@ async function ingestSingleMatch(
 
     let playerId = mapPlayerId(pen.playerNormalized, teamId, playerIndex);
     if (!playerId) {
-      const jersey = extractJerseyNumber(pen.playerPart);
-      const cleanName = normalizeWhitespace(stripJerseyNumber(pen.playerPart));
-      const canonicalName = cleanName ? (jersey ? `${cleanName} #${jersey}` : cleanName) : '';
-      const normalizedCanonical = normalizeName(canonicalName);
-
       const candidates = Array.from(playerIndex.entries())
         .filter(([key]) => key.startsWith(`${teamId}:`))
         .map(([key]) => key.split(':')[1])
         .slice(0, 5);
 
-      playerId =
-        canonicalName && normalizedCanonical
-          ? await ensureStubPlayer(
-              supa.client,
-              teamId,
-              canonicalName,
-              normalizedCanonical,
-              playerIndex,
-              'CREATED_STUB_PLAYER_PENALTY',
-              'protocol_unmapped_penalty',
-            )
-          : null;
-
-      if (playerId) {
-        stubCreatedPenaltyCount += 1;
-      } else {
-        unmappedPenaltyPlayers += 1;
-        console.warn(`${LOG_PREFIX} UNMAPPED_PENALTY_PLAYER`, {
-          team_id: teamId,
-          playerPart: pen.playerPart,
-          normalizedPlayerPart: pen.playerNormalized,
-          minutesTotal: pen.minutes,
-          raw_row: pen.detailsText,
-          candidates,
-        });
-        continue;
-      }
+      unmappedPenaltyPlayers += 1;
+      console.warn(`${LOG_PREFIX} UNMAPPED_PENALTY_PLAYER`, {
+        team_id: teamId,
+        playerPart: pen.playerPart,
+        normalizedPlayerPart: pen.playerNormalized,
+        minutesTotal: pen.minutes,
+        raw_row: pen.detailsText,
+        candidates,
+      });
+      continue;
     }
 
     const penTextLower = pen.detailsText.toLowerCase();

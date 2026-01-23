@@ -16,3 +16,15 @@ The migrations provision:
 - Auth-protected fantasy team tables with RLS policies
 - Points aggregation views for match and fantasy summaries
 - Enum + index helpers required by the scoring pipeline
+
+## Smoke Tests
+
+Run a quick view sanity check after applying migrations:
+
+```sql
+select * from public_players limit 5;
+
+select column_name, data_type
+from information_schema.columns
+where table_schema = 'public' and table_name = 'public_players';
+```

@@ -9,13 +9,17 @@ interface PlayerCardProps {
 }
 
 export function PlayerCard({ player }: PlayerCardProps) {
-  const rawPrice = player.price_final;
+  const rawPrice = player.price ?? player.price_final;
   const price =
     typeof rawPrice === 'number' && !Number.isNaN(rawPrice)
       ? `${formatPriceMillions(rawPrice)} credits`
       : 'N/A';
   const points =
-    typeof player.points_total === 'number' ? `${player.points_total.toFixed(1)} pts` : 'Points --';
+    typeof player.fantasy_ppg === 'number'
+      ? `${player.fantasy_ppg.toFixed(2)} FPPG`
+      : typeof player.fantasy_total === 'number'
+      ? `${player.fantasy_total.toFixed(1)} FP`
+      : 'Points --';
   const team = player.team || 'No Team';
 
   return (

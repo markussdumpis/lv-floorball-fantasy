@@ -43,9 +43,9 @@ export function usePlayers(initial: PlayerFilters = {}) {
       try {
         const supabase = getSupabaseClient();
         let q = supabase
-          .from('players')
+          .from('public_players')
           .select(
-            'id, name, position, team, price_final, price_manual, price_computed, points_total',
+            'id, name, position, team, price, price_final, fantasy_total, fantasy_ppg',
             { count: 'exact' }
           );
 
@@ -54,7 +54,13 @@ export function usePlayers(initial: PlayerFilters = {}) {
           q = q.ilike('name', `%${s}%`);
         }
         if (filters.position && filters.position !== 'ALL') {
-          q = q.eq('position', filters.position);
+          const rawPositions =
+            filters.position === 'A'
+              ? ['U']
+              : filters.position === 'D'
+              ? ['A']
+              : [filters.position];
+          q = q.in('position', rawPositions);
         }
         if (filters.team && filters.team !== 'ALL') {
           q = q.eq('team', filters.team);
@@ -62,10 +68,10 @@ export function usePlayers(initial: PlayerFilters = {}) {
 
         switch (filters.sort) {
           case 'price_asc':
-            q = q.order('price_final', { ascending: true, nullsFirst: true });
+            q = q.order('price', { ascending: true, nullsFirst: true });
             break;
           case 'price_desc':
-            q = q.order('price_final', { ascending: false, nullsFirst: false });
+            q = q.order('price', { ascending: false, nullsFirst: false });
             break;
           case 'name_desc':
             q = q.order('name', { ascending: false });
@@ -85,6 +91,9 @@ export function usePlayers(initial: PlayerFilters = {}) {
         if (err) throw err;
 
         const nextRows = rows ?? [];
+        if (nextRows[0]) {
+          console.log('[players] sample row', nextRows[0]);
+        }
         setData(prev => (reset ? nextRows : [...prev, ...nextRows]));
         setHasMore(
           count !== null ? to + 1 < count : nextRows.length === pageSize
