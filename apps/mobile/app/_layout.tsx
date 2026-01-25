@@ -1,9 +1,11 @@
 import { Tabs } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import type { Session } from '@supabase/supabase-js';
 import AuthScreen from './auth';
 import { getSupabaseClient, isSupabaseConfigured } from '../src/lib/supabaseClient';
+import { COLORS } from '../src/theme/colors';
 
 export default function RootLayout() {
   const [session, setSession] = useState<Session | null>(null);
@@ -71,39 +73,87 @@ export default function RootLayout() {
   }
 
   return (
-    <Tabs>
+    <Tabs
+      screenOptions={({ route }) => ({
+        headerShown: false,
+        tabBarStyle: {
+          height: 72,
+          paddingBottom: 12,
+          paddingTop: 8,
+          backgroundColor: COLORS.card,
+          borderTopWidth: 1,
+          borderTopColor: COLORS.border,
+        },
+        tabBarActiveTintColor: COLORS.accent,
+        tabBarInactiveTintColor: COLORS.muted2,
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
+        tabBarIcon: ({ color, focused, size }) => {
+          const iconSize = size ? size + 2 : 22;
+          const name = (() => {
+            if (route.name === 'index') return focused ? 'home' : 'home-outline';
+            if (route.name === 'squad') return focused ? 'grid' : 'grid-outline';
+            if (route.name === 'profile') return focused ? 'person' : 'person-outline';
+            return 'ellipse-outline';
+          })();
+          return <Ionicons name={name as any} color={color} size={iconSize} style={{ marginTop: 2 }} />;
+        },
+      })}
+    >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>🏠</Text>, // Emoji icons are MVP placeholders per 04_UI_UX.md
-        }}
-      />
-      <Tabs.Screen
-        name="players"
-        options={{
-          title: 'Players',
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>🧑‍🤝‍🧑</Text>,
         }}
       />
       <Tabs.Screen
         name="squad"
         options={{
           title: 'Squad',
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>⚙️</Text>,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ color }) => <Text style={[styles.tabIcon, { color }]}>👤</Text>,
+        }}
+      />
+      <Tabs.Screen
+        name="profile/[id]"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="squad-builder"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="build-team"
+        options={{
+          href: null,
         }}
       />
       <Tabs.Screen
         name="my-points"
         options={{
           title: 'My Points',
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="auth"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="player-points/[playerId]"
+        options={{
           href: null,
         }}
       />
@@ -123,9 +173,6 @@ const styles = StyleSheet.create({
     color: '#CBD5E1',
     marginTop: 12,
     fontSize: 16,
-  },
-  tabIcon: {
-    fontSize: 18,
   },
   errorText: {
     color: '#EF4444',

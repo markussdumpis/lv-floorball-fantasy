@@ -6,7 +6,8 @@ export const ROSTER_RULES = {
   TOTAL: 8,
 } as const;
 
-export const TOTAL_BUDGET = 100;
+export const SEASON_BUDGET_CREDITS = 90;
+export const TOTAL_BUDGET = SEASON_BUDGET_CREDITS;
 
 export const POSITIONS = {
   A: 'Attacker',
