@@ -45,7 +45,7 @@ export function usePlayers(initial: PlayerFilters = {}) {
         let q = supabase
           .from('public_players')
           .select(
-            'id, name, position, team, price, price_final, fantasy_total, fantasy_ppg',
+            'id, name, position, team, price, price_final, fantasy_total, fantasy_ppg, points_total, points',
             { count: 'exact' }
           );
 

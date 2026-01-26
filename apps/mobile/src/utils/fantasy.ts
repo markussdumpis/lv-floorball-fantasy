@@ -116,3 +116,28 @@ export function selectionError(player: Player, players: Player[], selectedIds: s
 export function canSelect(player: Player, players: Player[], selectedIds: string[]): boolean {
   return selectionError(player, players, selectedIds) === null;
 }
+
+const stripDiacritics = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+export function formatTeamCode(raw?: string | null): string {
+  if (!raw) return '---';
+  const cleaned = stripDiacritics(raw)
+    .toUpperCase()
+    .replace(/[^A-Z]/g, '')
+    .slice(0, 3);
+  return cleaned || '---';
+}
+
+export function formatPlayerShortName(fullName?: string | null): string {
+  if (!fullName) return '--';
+  const withoutNumbers = fullName
+    .split(/\s+/)
+    .filter(token => !/^#?\d+$/.test(token))
+    .join(' ');
+  const tokens = withoutNumbers.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return '--';
+  const first = tokens[0];
+  const surname = tokens.length > 1 ? tokens[tokens.length - 1] : '';
+  if (!surname || surname === first) return first;
+  return `${first}.${surname.charAt(0).toUpperCase()}`;
+}
