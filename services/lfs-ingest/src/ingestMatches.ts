@@ -370,8 +370,10 @@ async function fetchCalendarPages(
     console.log(`${LOG_PREFIX} Response status ${status}, content-type ${contentType}`);
 
     const bodyText = body?.toString() ?? '';
+    console.error(`${LOG_PREFIX} Body length: ${bodyText.length}`);
     if (!contentType.toLowerCase().includes('application/json')) {
       console.error(`${LOG_PREFIX} Unexpected content-type, expected JSON`);
+      console.error(`${LOG_PREFIX} Body snippet:`);
       console.error(bodyText.slice(0, 500));
       throw new Error('Expected JSON but received HTML');
     }
@@ -381,6 +383,7 @@ async function fetchCalendarPages(
       payload = JSON.parse(bodyText);
     } catch (err) {
       console.error(`${LOG_PREFIX} Failed to parse JSON`, err);
+      console.error(`${LOG_PREFIX} Body snippet:`);
       console.error(bodyText.slice(0, 500));
       throw err;
     }
