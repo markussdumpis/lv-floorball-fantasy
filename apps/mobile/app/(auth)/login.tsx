@@ -12,18 +12,29 @@ import {
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
-import { signIn, signUp } from '../src/lib/auth';
-import { looksLikeEmail, sanitizeEmail } from '../src/utils/email';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../../src/providers/AuthProvider';
+import { looksLikeEmail, sanitizeEmail } from '../../src/utils/email';
+import { COLORS } from '../../src/theme/colors';
 
-export default function AuthScreen() {
+type Mode = 'signIn' | 'signUp';
+
+type Props = {
+  initialMode?: Mode;
+};
+
+export function AuthScreen({ initialMode = 'signIn' }: Props) {
+  const router = useRouter();
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle, loading: authLoading } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn');
-  const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const handleSubmit = async () => {
+  const handleEmailAuth = async () => {
     const sanitizedEmail = sanitizeEmail(email);
     const trimmedPassword = password.trim();
 
@@ -40,33 +51,43 @@ export default function AuthScreen() {
       return;
     }
 
-    setLoading(true);
+    setSubmitting(true);
     setError(null);
     setMessage(null);
 
     try {
-      console.log(
-        'EMAIL_DEBUG',
-        JSON.stringify(sanitizedEmail),
-        [...sanitizedEmail].map(char => char.charCodeAt(0))
-      );
       if (mode === 'signIn') {
-        const { error: signInError } = await signIn(sanitizedEmail, trimmedPassword);
-        if (signInError) {
-          setError(signInError.message);
-        }
+        await signInWithEmail(sanitizedEmail, trimmedPassword);
+        router.replace('/(tabs)');
       } else {
-        const { error: signUpError } = await signUp(sanitizedEmail, trimmedPassword);
-        if (signUpError) {
-          setError(signUpError.message);
+        const session = await signUpWithEmail(sanitizedEmail, trimmedPassword);
+        if (session) {
+          router.replace('/(tabs)');
         } else {
-          setMessage('Account created. You can sign in with your credentials now.');
+          setMessage('Account created. If email confirmation is required, check your inbox.');
         }
       }
     } catch (e: any) {
       setError(e.message ?? 'Authentication failed.');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
+    }
+  };
+
+  const handleGoogle = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const session = await signInWithGoogle();
+      if (!session) {
+        setError('We could not complete Google sign-in. Please try again.');
+        return;
+      }
+      router.replace('/(tabs)');
+    } catch (e: any) {
+      setError(e.message ?? 'Google sign-in failed.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -76,10 +97,7 @@ export default function AuthScreen() {
       behavior={Platform.select({ ios: 'padding', android: undefined })}
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-        >
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Welcome to Latvian Floorball Fantasy</Text>
           <Text style={styles.subtitle}>
             {mode === 'signIn'
@@ -90,7 +108,7 @@ export default function AuthScreen() {
           <TextInput
             style={styles.input}
             placeholder="Email"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={COLORS.muted2}
             autoCapitalize="none"
             autoCorrect={false}
             autoComplete="email"
@@ -102,7 +120,7 @@ export default function AuthScreen() {
           <TextInput
             style={styles.input}
             placeholder="Password"
-            placeholderTextColor="#94A3B8"
+            placeholderTextColor={COLORS.muted2}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
@@ -112,11 +130,11 @@ export default function AuthScreen() {
           {message ? <Text style={styles.message}>{message}</Text> : null}
 
           <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleSubmit}
-            disabled={loading}
+            style={[styles.button, (submitting || authLoading) && styles.buttonDisabled]}
+            onPress={handleEmailAuth}
+            disabled={submitting || authLoading}
           >
-            {loading ? (
+            {submitting ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
               <Text style={styles.buttonText}>
@@ -126,8 +144,24 @@ export default function AuthScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={[styles.googleButton, (submitting || authLoading) && styles.buttonDisabled]}
+            onPress={handleGoogle}
+            disabled={submitting || authLoading}
+          >
+            {submitting ? (
+              <ActivityIndicator color={COLORS.text} />
+            ) : (
+              <Text style={styles.googleText}>Continue with Google</Text>
+            )}
+          </TouchableOpacity>
+          <Text style={styles.note}>
+            Google OAuth uses the app scheme redirect: lvfloorball://auth/callback (also add the Expo
+            Go URL in Supabase Auth settings).
+          </Text>
+
+          <TouchableOpacity
             onPress={() => setMode(prev => (prev === 'signIn' ? 'signUp' : 'signIn'))}
-            disabled={loading}
+            disabled={submitting || authLoading}
           >
             <Text style={styles.toggle}>
               {mode === 'signIn'
@@ -141,10 +175,14 @@ export default function AuthScreen() {
   );
 }
 
+export default function LoginRoute() {
+  return <AuthScreen initialMode="signIn" />;
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1E293B',
+    backgroundColor: COLORS.bg,
   },
   scrollContent: {
     flexGrow: 1,
@@ -153,36 +191,51 @@ const styles = StyleSheet.create({
     paddingBottom: 48,
   },
   title: {
-    color: '#F8FAFC',
+    color: COLORS.text,
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    color: '#CBD5E1',
+    color: COLORS.muted,
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 24,
   },
   input: {
-    backgroundColor: '#2D3748',
-    borderColor: '#4A5568',
+    backgroundColor: COLORS.card,
+    borderColor: COLORS.border,
     borderWidth: 1,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    color: '#F8FAFC',
+    color: COLORS.text,
     fontSize: 16,
     marginBottom: 12,
   },
   button: {
-    backgroundColor: '#FF6B00',
+    backgroundColor: COLORS.accent,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 12,
+  },
+  googleButton: {
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    backgroundColor: COLORS.card2,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  googleText: {
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: '600',
   },
   buttonDisabled: {
     opacity: 0.7,
@@ -193,7 +246,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   toggle: {
-    color: '#94A3B8',
+    color: COLORS.muted,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 16,
@@ -209,5 +262,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     marginVertical: 8,
+  },
+  note: {
+    color: COLORS.muted2,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 16,
   },
 });

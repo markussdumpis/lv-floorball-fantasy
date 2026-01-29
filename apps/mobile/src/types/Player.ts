@@ -12,4 +12,6 @@ export type Player = {
   fantasy_total?: number | null;
   fantasy_ppg?: number | null;
   points_total?: number | null;
+  pointsTotal?: number | null;
+  ppg?: number | null;
 };

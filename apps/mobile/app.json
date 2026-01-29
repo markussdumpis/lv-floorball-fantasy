@@ -2,7 +2,10 @@
   "expo": {
     "name": "lv-floorball-fantasy",
     "slug": "lv-floorball-fantasy",
-    "plugins": ["expo-router"],
+    "plugins": [
+      "expo-router",
+      "expo-web-browser"
+    ],
     "scheme": "lvfloorball",
     "android": {
       "predictiveBackGestureEnabled": false

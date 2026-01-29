@@ -1,0 +1,3 @@
+-- Placeholder migration.
+-- This version exists in the remote Supabase migration history as "applied".
+-- The real SQL was applied earlier; this file exists only to keep local migrations in sync.

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import { fetchWithTimeout } from '../lib/fetchWithTimeout';
+import { getSupabaseEnv } from '../lib/supabaseClient';
 
 export type LeaderboardUser = {
   user_id: string;
@@ -13,22 +14,27 @@ export function useLeaderboardTop3() {
   const [error, setError] = useState<string | null>(null);
 
   const fetchLeaderboard = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setError('Supabase is not configured. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.');
-      return;
-    }
-
     setLoading(true);
     setError(null);
     try {
-      const supabase = getSupabaseClient();
-      const { data, error: err } = await supabase
-        .from('leaderboard')
-        .select('user_id,nickname,total_points')
-        .order('total_points', { ascending: false, nullsLast: true })
-        .limit(3);
-      if (err) throw err;
-      setRows(data ?? []);
+      const { url, anon } = getSupabaseEnv();
+      const requestUrl = `${url}/rest/v1/leaderboard?select=user_id,nickname,total_points&order=total_points.desc.nullslast&limit=3`;
+      const { ok, status, json, text } = await fetchWithTimeout<LeaderboardUser[]>(
+        requestUrl,
+        {
+          headers: {
+            apikey: anon,
+            Authorization: `Bearer ${anon}`,
+            Accept: 'application/json',
+          },
+        },
+        15_000,
+        '[leaderboard top3]'
+      );
+      if (!ok) {
+        throw new Error(`HTTP ${status} ${text}`);
+      }
+      setRows(Array.isArray(json) ? json : []);
     } catch (e: any) {
       setError(e?.message ?? 'Failed to load leaderboard');
     } finally {

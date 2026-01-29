@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import { fetchWithTimeout } from '../lib/fetchWithTimeout';
+import { getSupabaseEnv, missingConfigMessage } from '../lib/supabaseClient';
 import type { Position } from '../constants/fantasyRules';
 import type { Player } from '../types/Player';
 
@@ -31,27 +32,22 @@ export function usePlayers(initial: PlayerFilters = {}) {
 
   const fetchPage = useCallback(
     async (reset = false) => {
-      if (!isSupabaseConfigured()) {
-        setError(
-          'Supabase is not configured. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.'
-        );
-        return;
-      }
-
       setLoading(true);
       setError(null);
       try {
-        const supabase = getSupabaseClient();
-        let q = supabase
-          .from('public_players')
-          .select(
-            'id, name, position, team, price, price_final, fantasy_total, fantasy_ppg, points_total, points',
-            { count: 'exact' }
-          );
+        const { url, anon } = getSupabaseEnv();
+        if (reset) pageRef.current = 0;
+        const currentPage = pageRef.current;
+        const from = currentPage * pageSize;
+        const to = from + pageSize - 1;
+
+        const params: string[] = [
+          'select=id,name,position,team,price,price_final,fantasy_total,fantasy_ppg',
+        ];
 
         if (filters.search && filters.search.trim()) {
           const s = filters.search.trim();
-          q = q.ilike('name', `%${s}%`);
+          params.push(`name=ilike.${encodeURIComponent(`%${s}%`)}`);
         }
         if (filters.position && filters.position !== 'ALL') {
           const rawPositions =
@@ -60,47 +56,63 @@ export function usePlayers(initial: PlayerFilters = {}) {
               : filters.position === 'D'
               ? ['A']
               : [filters.position];
-          q = q.in('position', rawPositions);
+          params.push(`position=in.(${rawPositions.join(',')})`);
         }
         if (filters.team && filters.team !== 'ALL') {
-          q = q.eq('team', filters.team);
+          params.push(`team=eq.${encodeURIComponent(filters.team)}`);
         }
 
-        switch (filters.sort) {
-          case 'price_asc':
-            q = q.order('price', { ascending: true, nullsFirst: true });
-            break;
-          case 'price_desc':
-            q = q.order('price', { ascending: false, nullsFirst: false });
-            break;
-          case 'name_desc':
-            q = q.order('name', { ascending: false });
-            break;
-          default:
-            q = q.order('name', { ascending: true });
-        }
+        const orderParam =
+          filters.sort === 'price_asc'
+            ? 'price.asc'
+            : filters.sort === 'price_desc'
+            ? 'price.desc'
+            : filters.sort === 'name_desc'
+            ? 'name.desc'
+            : 'name.asc';
+        params.push(`order=${encodeURIComponent(orderParam)}`);
 
-        if (reset) {
-          pageRef.current = 0;
-        }
-        const currentPage = pageRef.current;
-        const from = currentPage * pageSize;
-        const to = from + pageSize - 1;
+        const requestUrl = `${url}/rest/v1/public_players?${params.join('&')}`;
 
-        const { data: rows, error: err, count } = await q.range(from, to);
-        if (err) throw err;
-
-        const nextRows = rows ?? [];
-        if (nextRows[0]) {
-          console.log('[players] sample row', nextRows[0]);
-        }
-        setData(prev => (reset ? nextRows : [...prev, ...nextRows]));
-        setHasMore(
-          count !== null ? to + 1 < count : nextRows.length === pageSize
+        const { ok, status, json, headers } = await fetchWithTimeout<Player[]>(
+          requestUrl,
+          {
+            headers: {
+              apikey: anon,
+              Authorization: `Bearer ${anon}`,
+              Accept: 'application/json',
+              Prefer: 'count=exact',
+              Range: `${from}-${to}`,
+            },
+          },
+          15_000,
+          '[players]'
         );
+
+        if (!ok) {
+          throw new Error(`HTTP ${status}`);
+        }
+
+        const rows = Array.isArray(json) ? json : [];
+        const nextRows = rows.map(row => ({
+          ...row,
+          price: row.price ?? null,
+          price_final: row.price_final ?? row.price ?? null,
+          pointsTotal: (row as any).fantasy_total ?? 0,
+          ppg: (row as any).fantasy_ppg ?? 0,
+        }));
+        setData(prev => (reset ? nextRows : [...prev, ...nextRows]));
+        const contentRange = headers.get('content-range');
+        const total = contentRange?.split('/')?.[1];
+        const totalCount = total ? Number(total) : null;
+        setHasMore(totalCount !== null ? to + 1 < totalCount : nextRows.length === pageSize);
         pageRef.current = currentPage + 1;
       } catch (e: any) {
-        setError(e.message ?? 'Failed to load players');
+        if (e?.message?.includes('Supabase environment')) {
+          setError(missingConfigMessage);
+        } else {
+          setError(e.message ?? 'Failed to load players');
+        }
       } finally {
         setLoading(false);
       }
@@ -124,18 +136,23 @@ export function usePlayers(initial: PlayerFilters = {}) {
   );
 
   const fetchTeams = useCallback(async () => {
-    if (!isSupabaseConfigured()) return;
     try {
-      const supabase = getSupabaseClient();
-      const { data: rows, error: err } = await supabase
-        .from('players')
-        .select('team')
-        .not('team', 'is', null)
-        .order('team', { ascending: true });
-
-      if (err) throw err;
+      const { url, anon } = getSupabaseEnv();
+      const { ok, json } = await fetchWithTimeout<{ team: string | null }[]>(
+        `${url}/rest/v1/players?select=team&team=not.is.null&order=team.asc`,
+        {
+          headers: {
+            apikey: anon,
+            Authorization: `Bearer ${anon}`,
+            Accept: 'application/json',
+          },
+        },
+        15_000,
+        '[players teams]'
+      );
+      if (!ok) throw new Error('Failed to load teams');
       const unique = Array.from(
-        new Set((rows ?? []).map(row => row.team).filter(Boolean) as string[])
+        new Set(((Array.isArray(json) ? json : []).map(row => row.team).filter(Boolean) as string[]))
       );
       setTeams(unique);
     } catch (e) {

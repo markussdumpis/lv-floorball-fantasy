@@ -46,7 +46,10 @@ export default function HomeScreen() {
   const EDGE = Math.max(0, (width - CARD_WIDTH) / 2);
   const ITEM_SPACING = 14;
   const SNAP = CARD_WIDTH + ITEM_SPACING;
-  const { rows: leaderboardRows } = useLeaderboard(50);
+  const { rows: leaderboardRows, loading: leaderboardLoading, error: leaderboardError } = useLeaderboard(50);
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'MISSING';
+  const supabaseAnon = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  const supabaseAnonStatus = supabaseAnon ? 'OK' : 'MISSING';
 
   const [showRules, setShowRules] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(false);
@@ -54,6 +57,24 @@ export default function HomeScreen() {
   const watermarkAnim = useRef(new Animated.Value(0)).current;
   const contentHeightRef = useRef(0);
   const viewHeightRef = useRef(0);
+
+  useEffect(() => {
+    console.log('[home] mounted');
+  }, []);
+
+  const getDisplayName = (row: { nickname: string | null; user_id: string }) => {
+    if (row.nickname && row.nickname.trim()) return row.nickname.trim();
+    const uid = row.user_id ?? '';
+    if (uid.length <= 9) return uid || 'Unknown';
+    return `${uid.slice(0, 4)}…${uid.slice(-5)}`;
+  };
+
+  const formatPoints = (pts: number | null | undefined) => {
+    if (pts === null || pts === undefined) return '0';
+    const num = Number(pts);
+    if (Number.isNaN(num)) return '0';
+    return num.toFixed(0);
+  };
 
   useEffect(() => {
     const shouldShow = isAtBottom && !showRules;
@@ -120,7 +141,7 @@ export default function HomeScreen() {
           <View style={[styles.card, styles.matchesCardShell]}>
             <View style={styles.cardHeader}>
               <Text style={[styles.cardTitle, styles.matchesTitle]}>Upcoming matches</Text>
-              <TouchableOpacity activeOpacity={0.6} onPress={() => {}}>
+              <TouchableOpacity activeOpacity={0.6} onPress={() => router.push('/fixtures')}>
                 <Text style={styles.cardHint}>See all</Text>
               </TouchableOpacity>
             </View>
@@ -181,11 +202,19 @@ export default function HomeScreen() {
             />
           )}
 
-          {matchesError ? (
-            <Text style={styles.errorText} numberOfLines={2}>
-              {matchesError}
+          {__DEV__ && (
+            <Text
+              style={matchesError ? styles.errorText : styles.debugText}
+              numberOfLines={2}
+              selectable
+            >
+              {matchesLoading
+                ? 'loading…'
+                : matchesError
+                ? `error=${matchesError}`
+                : `matches=${matches.length}`}
             </Text>
-          ) : null}
+          )}
         </View>
 
         <Pressable
@@ -198,7 +227,13 @@ export default function HomeScreen() {
         >
           <Text style={styles.cardTitle}>Leaderboard</Text>
           <View style={styles.list}>
-            {leaderboardRows.length === 0 ? (
+            {leaderboardLoading ? (
+              <Text style={styles.emptyText}>Loading leaderboard…</Text>
+            ) : leaderboardError ? (
+              <Text style={styles.errorText} numberOfLines={2} selectable>
+                error={leaderboardError}
+              </Text>
+            ) : leaderboardRows.length === 0 ? (
               <Text style={styles.emptyText}>No leaderboard yet — be the first</Text>
             ) : (
               leaderboardRows.slice(0, 3).map((row, index) => (
@@ -217,15 +252,33 @@ export default function HomeScreen() {
                     <View style={styles.leaderboardBadge}>
                       <Text style={styles.leaderboardBadgeText}>{index + 1}</Text>
                     </View>
-                    <Text style={styles.leaderboardName}>{row.nickname || 'Unknown'}</Text>
+                    <Text style={styles.leaderboardName}>{getDisplayName(row)}</Text>
                   </View>
                   <Text style={styles.leaderboardPoints}>
-                    {(row.total_points ?? 0).toFixed(0)} pts
+                    {formatPoints(row.total_points)} pts
                   </Text>
                 </Pressable>
               ))
             )}
           </View>
+          {__DEV__ && (
+            <>
+              <Text
+                style={leaderboardError ? styles.errorText : styles.debugText}
+                numberOfLines={2}
+                selectable
+              >
+                {leaderboardLoading
+                  ? 'loading…'
+                  : leaderboardError
+                  ? `error=${leaderboardError}`
+                  : `leaderboard=${leaderboardRows.length}`}
+              </Text>
+              <Text style={styles.debugText} numberOfLines={2} selectable>
+                supabaseUrl={supabaseUrl || 'MISSING'} | anonKey={supabaseAnonStatus}
+              </Text>
+            </>
+          )}
         </Pressable>
 
         <View style={{ height: 40 }} />
@@ -307,10 +360,10 @@ export default function HomeScreen() {
                       <View style={styles.leaderboardBadge}>
                         <Text style={styles.leaderboardBadgeText}>{index + 1}</Text>
                       </View>
-                      <Text style={styles.leaderboardName}>{row.nickname || 'Unknown'}</Text>
+                      <Text style={styles.leaderboardName}>{getDisplayName(row)}</Text>
                     </View>
                     <Text style={styles.leaderboardPoints}>
-                      {(row.total_points ?? 0).toFixed(0)} pts
+                      {formatPoints(row.total_points)} pts
                     </Text>
                   </View>
                 ))}
@@ -639,6 +692,10 @@ const styles = StyleSheet.create({
   errorText: {
     color: COLORS.accent2,
     fontSize: 12,
+  },
+  debugText: {
+    color: COLORS.muted,
+    fontSize: 11,
   },
   skeletonLine: {
     height: 12,

@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import { fetchJson, getStoredSession } from '../lib/supabaseRest';
 import { SEASON_BUDGET_CREDITS } from '../constants/fantasyRules';
 import { usePlayers } from './usePlayers';
+import { useRef, useEffect } from 'react';
 
 export type SquadSlotKey = 'U1' | 'U2' | 'U3' | 'U4' | 'A1' | 'A2' | 'V1' | 'F1';
 export type SquadSlot = { slot_key: SquadSlotKey; player_id: string | null };
@@ -67,14 +68,16 @@ export function useSquad() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: players } = usePlayers({ sort: 'price_desc', pageSize: 200 });
+  const { data: players, loading: playersLoading, error: playersError } = usePlayers({ sort: 'price_desc', pageSize: 200 });
   const playerMap = useMemo(() => {
     const m = new Map<string, (typeof players)[number]>();
     players.forEach(p => m.set(p.id, p));
     return m;
   }, [players]);
-
-  const supabase = getSupabaseClient();
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const selectedPlayers = useMemo(() => {
     return state.slots
@@ -96,33 +99,64 @@ export function useSquad() {
     return 'U';
   };
 
+  const fetchLatestTeamId = useCallback(async (userId: string): Promise<string | null> => {
+    const { data } = await fetchJson<{ id: string }[]>('/rest/v1/fantasy_teams', {
+      requireAuth: true,
+      query: {
+        select: 'id',
+        user_id: `eq.${userId}`,
+        order: 'created_at.desc',
+        limit: 1,
+      },
+    });
+    return Array.isArray(data) && data[0]?.id ? data[0].id : null;
+  }, []);
+
   const getOrCreateFantasyTeam = useCallback(async (): Promise<string | null> => {
-    if (!isSupabaseConfigured()) return null;
-    const { data: userResp, error: userErr } = await supabase.auth.getUser();
-    if (userErr || !userResp.user) return null;
-    const userId = userResp.user.id;
+    const { token, userId } = await getStoredSession();
+    if (!token || !userId) return null;
 
-    const { data: existingTeam, error: teamErr } = await supabase
-      .from('fantasy_teams')
-      .select('id')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (teamErr && teamErr.code !== 'PGRST116') throw teamErr;
-    if (existingTeam?.id) return existingTeam.id;
+    try {
+      const existing = await fetchLatestTeamId(userId);
+      if (existing) return existing;
 
-    const { data: inserted, error: insertErr } = await supabase
-      .from('fantasy_teams')
-      .insert({
-        user_id: userId,
-        budget: state.budgetTotal,
-      })
-      .select('id')
-      .single();
-    if (insertErr) throw insertErr;
-    return inserted.id;
-  }, [state.budgetTotal, supabase]);
+      const { data, headers } = await fetchJson<any>(
+        '/rest/v1/fantasy_teams?select=id,user_id,name,created_at',
+        {
+        requireAuth: true,
+        method: 'POST',
+        body: {
+          user_id: userId,
+        },
+        timeoutMs: 12_000,
+        }
+      );
+
+      // Body may be array, object, or empty
+      const fromBody = Array.isArray(data)
+        ? data[0]?.id
+        : data && typeof data === 'object'
+        ? (data as any).id
+        : null;
+      if (fromBody) return fromBody;
+
+      const parseUuid = (value: string | null) => {
+        if (!value) return null;
+        const m = value.match(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}/);
+        return m ? m[0] : null;
+      };
+
+      const locHeader = headers.get('content-location') ?? headers.get('location') ?? null;
+      const fromHeader = parseUuid(locHeader);
+      if (fromHeader) return fromHeader;
+
+      console.warn('[squad] create team returned no body; falling back to latest team lookup');
+      return await fetchLatestTeamId(userId);
+    } catch (err) {
+      console.warn('[squad] create team failed', err);
+      return null;
+    }
+  }, [fetchLatestTeamId]);
 
   const persistCache = useCallback(async (snapshot: SquadSnapshot) => {
     try {
@@ -155,36 +189,31 @@ export function useSquad() {
     setLoading(true);
     setError(null);
     try {
+      console.log('[squad] start load');
       const cached = await loadFromCache();
       if (cached) {
         setState(cached);
         setSavedSnapshot(cached);
       }
 
-      if (!isSupabaseConfigured()) {
-        if (!cached) {
-          setError('Supabase not configured');
-        }
+      const { token, userId } = await getStoredSession();
+      if (!token || !userId) {
+        setError('Please sign in');
         return;
       }
+      console.log('[squad] storage auth ok', { hasToken: !!token, userId });
 
-      const { data: userResp, error: userErr } = await supabase.auth.getUser();
-      if (userErr || !userResp.user) {
-        if (!cached) {
-          setError('Not signed in');
-        }
-        return;
-      }
-      const userId = userResp.user.id;
-
-      const { data: teamRow, error: teamErr } = await supabase
-        .from('fantasy_teams')
-        .select('id')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (teamErr && teamErr.code !== 'PGRST116') throw teamErr;
+      const { data: teamRows } = await fetchJson<{ id: string }[]>('/rest/v1/fantasy_teams', {
+        requireAuth: true,
+        query: {
+          select: 'id',
+          user_id: `eq.${userId}`,
+          order: 'created_at.desc',
+          limit: 1,
+        },
+        timeoutMs: 12_000,
+      });
+      const teamRow = Array.isArray(teamRows) ? teamRows[0] : null;
       if (!teamRow?.id) {
         const empty: SquadSnapshot = {
           slots: SLOT_KEYS.map(slot_key => ({ slot_key, player_id: null })),
@@ -202,29 +231,19 @@ export function useSquad() {
 
       setTeamId(teamRow.id);
 
-      const { data: playerRows, error: playersErr } = await supabase
-        .from('fantasy_team_players')
-        .select(
-          `
-          player_id,
-          is_captain,
-          joined_at,
-          left_at,
-          players (
-            id,
-            name,
-            position,
-            team,
-            price,
-            price_final,
-            points_total,
-            points
-          )
-        `
-        )
-        .eq('fantasy_team_id', teamRow.id)
-        .is('left_at', null);
-      if (playersErr && playersErr.code !== 'PGRST116') throw playersErr;
+      const { data: playerRows } = await fetchJson<any[]>(
+        '/rest/v1/fantasy_team_players',
+        {
+          requireAuth: true,
+          query: {
+            select:
+              'player_id,is_captain,joined_at,left_at,players(id,name,position,team,price,price_final,points_total,points)',
+            fantasy_team_id: `eq.${teamRow.id}`,
+            left_at: 'is.null',
+          },
+          timeoutMs: 12_000,
+        }
+      );
 
       const mapped = (playerRows ?? []).map(row => ({
         id: row.player_id as string | null,
@@ -268,11 +287,19 @@ export function useSquad() {
         teamPoints: cached?.teamPoints ?? 0,
       };
       try {
-        const { data: pointsRow } = await supabase
-          .from('user_team_points_view')
-          .select('total_points')
-          .eq('fantasy_team_id', teamRow.id)
-          .maybeSingle();
+        const { data: pointsRows } = await fetchJson<{ total_points: number }[]>(
+          '/rest/v1/user_team_points_view',
+          {
+            requireAuth: true,
+            query: {
+              select: 'total_points',
+              fantasy_team_id: `eq.${teamRow.id}`,
+              limit: 1,
+            },
+            timeoutMs: 12_000,
+          }
+        );
+        const pointsRow = Array.isArray(pointsRows) ? pointsRows[0] : null;
         if (pointsRow && typeof pointsRow.total_points === 'number') {
           snapshot.teamPoints = pointsRow.total_points;
         }
@@ -288,11 +315,20 @@ export function useSquad() {
     } finally {
       setLoading(false);
     }
-  }, [loadFromCache, persistCache, supabase, state.transfersLeft]);
+  }, [loadFromCache, persistCache, state.transfersLeft]);
 
   const updateSlot = useCallback((slot_key: SquadSlotKey, player_id: string | null) => {
     setState(prev => {
-      const slots = prev.slots.map(s => (s.slot_key === slot_key ? { ...s, player_id } : s));
+      const slots = prev.slots.map(s => {
+        if (s.slot_key === slot_key) {
+          return { ...s, player_id };
+        }
+        // ensure a player cannot be selected in multiple slots
+        if (player_id && s.player_id === player_id) {
+          return { ...s, player_id: null };
+        }
+        return s;
+      });
       return { ...prev, slots };
     });
   }, []);
@@ -303,37 +339,121 @@ export function useSquad() {
 
   const chooseCaptain = useCallback(
     async (playerId: string) => {
-      if (!isSupabaseConfigured()) {
-        return { ok: false, error: 'Supabase not configured' };
-      }
-      const team = teamId ?? (await getOrCreateFantasyTeam());
+      const { token, userId } = await getStoredSession();
+      if (!token || !userId) return { ok: false, error: 'Not signed in' };
+
+      const ensureTeamId = async (): Promise<string | null> => {
+        if (teamId) return teamId;
+        return fetchLatestTeamId(userId);
+      };
+
+      const team = await ensureTeamId();
       if (!team) {
-        return { ok: false, error: 'No fantasy team' };
+        return { ok: false, error: 'No fantasy team loaded' };
       }
+      setTeamId(team);
+
       try {
-        const { error: rpcErr, data } = await supabase.rpc('set_captain', { p_team_id: team, p_player_id: playerId });
-        if (rpcErr) {
-          const detail = (rpcErr as any)?.details ?? rpcErr?.message ?? '';
-          if (String(detail).includes('CAPTAIN_COOLDOWN')) {
-            return { ok: false, error: detail };
+        const { data: rosterRows } = await fetchJson<{ player_id: string; is_captain: boolean }[]>(
+          '/rest/v1/fantasy_team_players',
+          {
+            requireAuth: true,
+            query: {
+              select: 'player_id,is_captain',
+              fantasy_team_id: `eq.${team}`,
+              left_at: 'is.null',
+            },
+            timeoutMs: 12_000,
           }
-          return { ok: false, error: rpcErr.message ?? 'Failed to set captain' };
+        );
+        let roster = rosterRows ?? [];
+
+        const selectedIds = stateRef.current.slots.map(s => s.player_id).filter(Boolean) as string[];
+        if (!selectedIds.length) {
+          return { ok: false, error: 'Add players to your squad before choosing a captain.' };
         }
 
-        setCaptain(playerId);
-        const nextSnapshot: SquadSnapshot = {
-          ...state,
-          captainId: playerId,
-        };
-        setSavedSnapshot(nextSnapshot);
-        await persistCache(nextSnapshot);
+        // If roster is empty (e.g., user has not saved yet), seed it with current selection
+        if (!roster.length) {
+          const payload = selectedIds.map(id => ({
+            fantasy_team_id: team,
+            player_id: id,
+            is_captain: false,
+            joined_at: new Date().toISOString(),
+            left_at: null,
+          }));
+          console.log(`[captain] seeding roster rows=${payload.length} team=${team}`);
+          try {
+            await fetchJson('/rest/v1/fantasy_team_players?select=fantasy_team_id,player_id,joined_at,left_at,is_captain', {
+              requireAuth: true,
+              method: 'POST',
+              body: payload,
+              timeoutMs: 12_000,
+            });
+            roster = payload.map(p => ({ player_id: p.player_id, is_captain: false }));
+          } catch (seedErr: any) {
+            console.error('[captain] seed roster failed', seedErr);
+            return { ok: false, error: seedErr?.message ?? 'Failed to add squad players before setting captain.' };
+          }
+        }
+        const currentCaptain = roster.find(r => r.is_captain)?.player_id ?? stateRef.current.captainId;
+        if (currentCaptain === playerId) {
+          setCaptain(playerId);
+          return { ok: true };
+        }
+        const rosterHasPlayer = roster.some(r => r.player_id === playerId);
+        const selectionHasPlayer = selectedIds.includes(playerId);
+        if (!rosterHasPlayer && selectionHasPlayer) {
+          // add the missing player row just-in-time
+          try {
+            await fetchJson('/rest/v1/fantasy_team_players?select=fantasy_team_id,player_id,joined_at,left_at,is_captain', {
+              requireAuth: true,
+              method: 'POST',
+              body: [{
+                fantasy_team_id: team,
+                player_id: playerId,
+                is_captain: false,
+                joined_at: new Date().toISOString(),
+                left_at: null,
+              }],
+              timeoutMs: 12_000,
+            });
+            roster.push({ player_id: playerId, is_captain: false });
+          } catch (addErr: any) {
+            console.error('[captain] add missing player failed', addErr);
+            return { ok: false, error: addErr?.message ?? 'Failed to sync squad before setting captain.' };
+          }
+        } else if (!rosterHasPlayer && !selectionHasPlayer) {
+          return { ok: false, error: 'Selected player is not in your current roster.' };
+        }
+
+        console.log(`[captain] selecting player_id=${playerId} team_id=${team}`);
+        await fetchJson('/rest/v1/rpc/set_captain', {
+          requireAuth: true,
+          method: 'POST',
+          body: { p_team_id: team, p_player_id: playerId },
+          timeoutMs: 12_000,
+        });
+        console.log(`[captain] rpc status=ok team_id=${team}`);
+
+        setCaptain(playerId); // optimistic
+        await loadSquad();
+
+        const rosterCount = stateRef.current.slots.filter(s => s.player_id).length;
+        console.log(`[captain] roster count=${rosterCount}`);
+        if (rosterCount === 0) {
+          console.warn(
+            '[captain] roster empty after captain change — likely left_at was updated; check fantasy_team_players rows.'
+          );
+          setError('Roster empty after captain change — likely left_at was updated; check fantasy_team_players rows.');
+        }
         return { ok: true };
       } catch (e: any) {
         console.error('[useSquad] chooseCaptain error', e);
         return { ok: false, error: e?.message ?? 'Failed to set captain' };
       }
     },
-    [getOrCreateFantasyTeam, persistCache, setCaptain, state, supabase, teamId]
+    [fetchLatestTeamId, loadSquad, setCaptain, teamId]
   );
 
   const saveSquad = useCallback(async () => {
@@ -367,78 +487,109 @@ export function useSquad() {
       teamPoints: state.teamPoints,
     };
     try {
-      if (isSupabaseConfigured()) {
-        const team = await getOrCreateFantasyTeam();
-        if (!team) {
-          return fail('Unable to load fantasy team for this account.');
+      const team = await getOrCreateFantasyTeam();
+      if (!team) {
+        return fail('Unable to load fantasy team for this account.');
+      }
+      setTeamId(team);
+
+      const captainId = state.captainId;
+      if (!captainId) {
+        return fail('Pick a captain first.');
+      }
+
+      const newIds = state.slots.map(s => s.player_id).filter(Boolean) as string[];
+      let desiredCaptainId: string | null =
+        state.captainId && newIds.includes(state.captainId) ? state.captainId : newIds[0] ?? null;
+      if (!desiredCaptainId) {
+        return fail('Pick a captain first.');
+      }
+
+      // Fetch current active rows
+      const { data: activeRows } = await fetchJson<{ player_id: string; is_captain: boolean }[]>(
+        '/rest/v1/fantasy_team_players',
+        {
+          requireAuth: true,
+          query: {
+            select: 'player_id,is_captain',
+            fantasy_team_id: `eq.${team}`,
+            left_at: 'is.null',
+          },
+          timeoutMs: 12_000,
         }
-        setTeamId(team);
+      );
+      const activeIds = (activeRows ?? []).map(r => r.player_id);
+      const currentCaptainId = (activeRows ?? []).find(r => r.is_captain)?.player_id ?? null;
 
-        const captainId = state.captainId;
-        if (!captainId) {
-          return fail('Choose a captain before saving.');
+      // Close memberships not in the new squad
+      const toClose = activeIds.filter(id => !newIds.includes(id));
+      if (toClose.length) {
+        await fetchJson('/rest/v1/fantasy_team_players', {
+          requireAuth: true,
+          method: 'PATCH',
+          query: {
+            fantasy_team_id: `eq.${team}`,
+            player_id: `in.(${toClose.join(',')})`,
+            left_at: 'is.null',
+          },
+          body: {
+            left_at: new Date().toISOString(),
+            is_captain: false,
+            captain_to: new Date().toISOString(),
+          },
+          timeoutMs: 12_000,
+        });
+      }
+
+      // Add new memberships for players not already active
+      const toInsert = newIds.filter(id => !activeIds.includes(id));
+      if (toInsert.length) {
+        const rosterPayload = toInsert.map(id => ({
+          fantasy_team_id: team,
+          player_id: id,
+          is_captain: false,
+          joined_at: new Date().toISOString(),
+          left_at: null,
+        }));
+        console.log(`[squad] POST fantasy_team_players count=${rosterPayload.length} team=${team}`);
+        try {
+          await fetchJson('/rest/v1/fantasy_team_players?select=fantasy_team_id,player_id,joined_at,left_at,is_captain', {
+            requireAuth: true,
+            method: 'POST',
+            body: rosterPayload,
+            timeoutMs: 12_000,
+          });
+          console.log('[squad] roster insert ok');
+        } catch (e: any) {
+          console.error('[squad] roster insert failed', e);
+          return fail(e?.message ?? 'Failed to save roster players');
         }
+      }
 
-        const newIds = state.slots.map(s => s.player_id).filter(Boolean) as string[];
-
-        // Fetch current active rows
-        const { data: activeRows, error: activeErr } = await supabase
-          .from('fantasy_team_players')
-          .select('player_id')
-          .eq('fantasy_team_id', team)
-          .is('left_at', null);
-        if (activeErr) {
-          return fail(activeErr.message ?? 'Failed to load current squad');
-        }
-        const activeIds = (activeRows ?? []).map(r => r.player_id);
-
-        // Close memberships not in the new squad
-        const toClose = activeIds.filter(id => !newIds.includes(id));
-        if (toClose.length) {
-          const { error: closeErr } = await supabase
-            .from('fantasy_team_players')
-            .update({ left_at: new Date().toISOString(), is_captain: false, captain_to: new Date().toISOString() })
-            .eq('fantasy_team_id', team)
-            .in('player_id', toClose)
-            .is('left_at', null);
-          if (closeErr) {
-            return fail(closeErr.message ?? 'Failed to close removed players');
-          }
-        }
-
-        // Add new memberships for players not already active
-        const toInsert = newIds.filter(id => !activeIds.includes(id));
-        if (toInsert.length) {
-          const { error: insertErr } = await supabase.from('fantasy_team_players').insert(
-            toInsert.map(id => ({
-              fantasy_team_id: team,
-              player_id: id,
-              is_captain: false,
-              joined_at: new Date().toISOString(),
-              left_at: null,
-            }))
-          );
-          if (insertErr) {
-            return fail(insertErr.message ?? 'Failed to add new players');
-          }
-        }
-
-        // Ensure captain via RPC (handles cooldown)
-        const { error: captainErr } = await supabase.rpc('set_captain', { p_team_id: team, p_player_id: captainId });
-        if (captainErr) {
-          const detail = (captainErr as any)?.details ?? captainErr?.message ?? '';
+      // Ensure captain via RPC (handles cooldown)
+      if (desiredCaptainId && desiredCaptainId !== currentCaptainId) {
+        try {
+          await fetchJson('/rest/v1/rpc/set_captain', {
+            requireAuth: true,
+            method: 'POST',
+            body: { p_team_id: team, p_player_id: desiredCaptainId },
+            timeoutMs: 12_000,
+          });
+        } catch (e: any) {
+          const detail = e?.message ?? '';
           return fail(detail || 'Failed to set captain');
         }
-
-        // Refresh points after successful transfer window updates
-        try {
-          await loadSquad({ overrideTransfersLeft: nextTransfersLeft });
-        } catch (loadErr: any) {
-          console.warn('[useSquad] refresh after save failed', loadErr);
-        }
-        return { ok: true };
+        snapshot.captainId = desiredCaptainId;
+        setCaptain(desiredCaptainId);
       }
-      // If Supabase is not configured, just update local state/cache
+
+      // Refresh points after successful transfer window updates
+      try {
+        await loadSquad({ overrideTransfersLeft: nextTransfersLeft });
+      } catch (loadErr: any) {
+        console.warn('[useSquad] refresh after save failed', loadErr);
+      }
+
       setState(prev => ({ ...prev, transfersLeft: nextTransfersLeft }));
       setSavedSnapshot(snapshot);
       await persistCache(snapshot);
@@ -450,26 +601,26 @@ export function useSquad() {
     } finally {
       setSaving(false);
     }
-  }, [getOrCreateFantasyTeam, loadSquad, persistCache, savedSnapshot, state, supabase]);
+  }, [getOrCreateFantasyTeam, loadSquad, persistCache, savedSnapshot, state]);
 
   const totalCost = useMemo(() => {
-    let sum = 0;
-    state.slots.forEach(s => {
-      if (s.player_id) {
-        const p = playerMap.get(s.player_id);
-        const price =
-          typeof p?.price_final === 'number' && !Number.isNaN(p.price_final)
-            ? p.price_final
-            : typeof p?.price === 'number' && !Number.isNaN(p.price)
-            ? p.price
-            : 0;
-        sum += price;
-      }
-    });
-    return sum;
-  }, [playerMap, state.slots]);
+    const priceFor = (playerId: string | null) => {
+      if (!playerId) return 0;
+      const detail = state.playerDetails[playerId];
+      const player = detail ?? playerMap.get(playerId);
+      const price =
+        typeof player?.price_final === 'number' && !Number.isNaN(player.price_final)
+          ? player.price_final
+          : typeof player?.price === 'number' && !Number.isNaN(player.price)
+          ? player.price
+          : 0;
+      return price;
+    };
 
-  const remainingBudget = state.budgetTotal - totalCost;
+    return state.slots.reduce((sum, slot) => sum + priceFor(slot.player_id), 0);
+  }, [playerMap, state.playerDetails, state.slots]);
+
+  const remainingBudget = SEASON_BUDGET_CREDITS - totalCost;
   const pendingTransfersUsed = useMemo(() => {
     if (!savedSnapshot) return 0;
     return SLOT_KEYS.reduce((count, key) => {
@@ -503,6 +654,8 @@ export function useSquad() {
     totalCost,
     remainingBudget,
     players,
+    playersLoading,
+    playersError,
     pendingTransfersUsed,
     selectedPlayers,
   };

@@ -1,7 +1,7 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { getSupabaseClient } from '../../src/lib/supabaseClient';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { buildHeaders, getSupabaseEnv, getStoredSession } from '../../../src/lib/supabaseRest';
 
 type MatchRow = {
   match_id: string;
@@ -47,6 +47,7 @@ export default function PlayerPointsDetailsScreen() {
     goals_against: 0,
   });
   const [playerName, setPlayerName] = useState<string>(nameParam ? decodeURIComponent(String(nameParam)) : 'Player');
+  const [reloadKey, setReloadKey] = useState(0);
 
   const lastMatch = useMemo(() => (recentMatches.length ? recentMatches[0] : null), [recentMatches]);
 
@@ -60,34 +61,57 @@ export default function PlayerPointsDetailsScreen() {
       }
       setLoading(true);
       setError(null);
-      const supabase = getSupabaseClient();
-
       try {
+        // optional name fetch (lightweight) using REST
         if (!nameParam) {
-          const { data: playerRow } = await supabase
-            .from('players')
-            .select('name')
-            .eq('id', playerId)
-            .maybeSingle();
-          if (playerRow?.name) {
-            setPlayerName(playerRow.name);
+          try {
+            const { url } = getSupabaseEnv();
+            const headers = await buildHeaders({ requireAuth: true });
+            const nameUrl = `${url}/rest/v1/players?select=name&id=eq.${playerId}&limit=1`;
+            console.log(`${LOG_PREFIX} name fetch playerId=${playerId} url=${nameUrl}`);
+            const nameResp = await fetch(nameUrl, { headers });
+            const nameJson = nameResp.ok ? await nameResp.json() : [];
+            const playerRow = Array.isArray(nameJson) ? nameJson[0] : null;
+            if (playerRow?.name) setPlayerName(playerRow.name);
+          } catch (nameErr) {
+            console.warn(`${LOG_PREFIX} name lookup skipped`, nameErr);
           }
         }
 
-        const { data: rows, error: rowsError } = await supabase
-          .from('player_match_points_details_view')
-          .select('match_id, match_date, match_status, season, opponent_team_name, points, goals, assists, pen_min, saves, goals_against')
-          .eq('player_id', playerId)
-          .eq('season', CURRENT_SEASON)
-          .eq('match_status', 'finished')
-          .order('match_date', { ascending: false });
+        const { url } = getSupabaseEnv();
+        const query =
+          'match_id,match_date,match_status,season,opponent_team_name,points,goals,assists,pen_min,saves,goals_against';
+        const requestUrl = `${url}/rest/v1/player_match_points_details_view?select=${encodeURIComponent(
+          query
+        )}&player_id=eq.${playerId}&season=eq.${CURRENT_SEASON}&match_status=eq.finished&order=match_date.desc`;
 
-        if (rowsError) {
-          console.warn(`${LOG_PREFIX} Fetch error`, rowsError);
+        const session = await getStoredSession();
+        const hasToken = !!session.token;
+        const headers = await buildHeaders({ requireAuth: true });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 12_000);
+
+        console.log(`${LOG_PREFIX} fetch start playerId=${playerId} hasToken=${hasToken} url=${requestUrl}`);
+        let rows: MatchRow[] = [];
+        try {
+          const response = await fetch(requestUrl, {
+            headers,
+            signal: controller.signal,
+          });
+          const status = response.status;
+          console.log(`${LOG_PREFIX} status=${status}`);
+          const text = await response.text();
+          if (!response.ok) {
+            console.error(`${LOG_PREFIX} body=${text.slice(0, 200)}`);
+            throw new Error(`HTTP ${status}`);
+          }
+          rows = text ? (JSON.parse(text) as MatchRow[]) : [];
+        } finally {
+          clearTimeout(timeout);
         }
 
         if (!isMounted) return;
-        const finishedRows = (rows ?? []) as MatchRow[];
+        const finishedRows = rows ?? [];
         setRecentMatches(finishedRows.slice(0, 5));
 
         const summed = finishedRows.reduce<Totals>(
@@ -115,7 +139,7 @@ export default function PlayerPointsDetailsScreen() {
     return () => {
       isMounted = false;
     };
-  }, [playerId, nameParam]);
+  }, [playerId, nameParam, reloadKey]);
 
   return (
     <>
@@ -128,6 +152,9 @@ export default function PlayerPointsDetailsScreen() {
         ) : error ? (
           <View style={styles.center}>
             <Text style={styles.error}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={() => setReloadKey(key => key + 1)}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
           </View>
         ) : (
           <>
@@ -225,6 +252,19 @@ const styles = StyleSheet.create({
   },
   error: {
     color: '#c00',
+  },
+  retryButton: {
+    marginTop: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#334155',
+    backgroundColor: '#111827',
+  },
+  retryText: {
+    color: '#e5e7eb',
+    fontWeight: '600',
   },
   card: {
     backgroundColor: '#0b152a',

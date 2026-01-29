@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import { fetchWithTimeout } from '../lib/fetchWithTimeout';
+import { getSupabaseEnv } from '../lib/supabaseClient';
 
 export type LeaderboardItem = {
   user_id: string;
@@ -7,46 +8,47 @@ export type LeaderboardItem = {
   total_points: number | null;
 };
 
-const MOCK_ROWS: LeaderboardItem[] = [
-  { user_id: 'mock-1', nickname: 'Player One', total_points: 120 },
-  { user_id: 'mock-2', nickname: 'Player Two', total_points: 98 },
-  { user_id: 'mock-3', nickname: 'Player Three', total_points: 87 },
-];
-
 export function useLeaderboard(limit = 3) {
-  const [rows, setRows] = useState<LeaderboardItem[]>(MOCK_ROWS);
+  const [rows, setRows] = useState<LeaderboardItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchLeaderboard = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setError(
-        'Supabase is not configured. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.'
-      );
-      setRows(MOCK_ROWS);
-      return;
-    }
+  const formatError = (err: { message?: string; code?: string } | null | undefined) => {
+    if (!err) return 'Unknown error';
+    const message = err.message ?? 'Unknown error';
+    return err.code ? `${message} | code=${err.code}` : message;
+  };
 
+  const fetchLeaderboard = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const supabase = getSupabaseClient();
-      const { data, error: err } = await supabase
-        .from('leaderboard')
-        .select('user_id,nickname,total_points')
-        .order('total_points', { ascending: false, nullsLast: true })
-        .limit(limit);
-
-      if (err) throw err;
-      const next = data && data.length ? data : MOCK_ROWS;
-      setRows(next);
+      const { url, anon } = getSupabaseEnv();
+      const requestUrl = `${url}/rest/v1/leaderboard?select=*&order=total_points.desc&limit=${limit}`;
+      const { ok, status, json, text } = await fetchWithTimeout<LeaderboardItem[]>(
+        requestUrl,
+        {
+          headers: {
+            apikey: anon,
+            Authorization: `Bearer ${anon}`,
+            Accept: 'application/json',
+          },
+        },
+        15_000,
+        '[home leaderboard]'
+      );
+      if (!ok) {
+        throw new Error(`HTTP ${status} ${text}`);
+      }
+      setRows(Array.isArray(json) ? json : []);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load leaderboard');
-      setRows(MOCK_ROWS);
+      setError(formatError(e));
+      console.error('[home leaderboard] unexpected error', e);
+      setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [limit]);
+  }, []);
 
   useEffect(() => {
     fetchLeaderboard();

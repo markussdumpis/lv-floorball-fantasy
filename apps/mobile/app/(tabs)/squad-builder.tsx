@@ -14,11 +14,12 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useSquad, SquadSlotKey } from '../src/hooks/useSquad';
-import { AppBackground } from '../src/components/AppBackground';
-import { SEASON_BUDGET_CREDITS } from '../src/constants/fantasyRules';
-import type { Player } from '../src/types/Player';
-import { formatPlayerShortName, formatTeamCode } from '../src/utils/fantasy';
+import { useSquad, SquadSlotKey } from '../../src/hooks/useSquad';
+import { AppBackground } from '../../src/components/AppBackground';
+import { SEASON_BUDGET_CREDITS } from '../../src/constants/fantasyRules';
+import type { Player } from '../../src/types/Player';
+import { formatPlayerShortName, formatTeamCode } from '../../src/utils/fantasy';
+import { fetchLockedPlayersToday } from '../../src/lib/supabaseRest';
 
 type SlotGroup = 'U' | 'A' | 'V' | 'FLEX';
 
@@ -69,6 +70,8 @@ export default function SquadBuilder({ showClose = true }: Props) {
     saveSquad,
     remainingBudget,
     players,
+    playersLoading,
+    playersError,
     chooseCaptain,
     resetUnsavedChanges,
     pendingTransfersUsed,
@@ -77,10 +80,19 @@ export default function SquadBuilder({ showClose = true }: Props) {
     error,
     selectedPlayers,
   } = useSquad();
+  const [pickContext, setPickContext] = useState<{
+    slot: SquadSlotKey;
+    slotIndex: number;
+    allowedPositions: ('U' | 'A' | 'V')[];
+    mode: 'swap' | 'initial';
+  } | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [activeSlot, setActiveSlot] = useState<SquadSlotKey | null>(null);
   const [captainPickerVisible, setCaptainPickerVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(true);
+  const [lockedPlayers, setLockedPlayers] = useState<Set<string>>(new Set());
+  const [lockWarning, setLockWarning] = useState<string | null>(null);
+  const [lockErrorShown, setLockErrorShown] = useState(false);
 
   useEffect(() => {
     loadSquad();
@@ -97,6 +109,32 @@ export default function SquadBuilder({ showClose = true }: Props) {
     const needsBuild = savedSnapshot.slots.some(s => !s.player_id);
     setIsEditing(needsBuild);
   }, [savedSnapshot]);
+
+  const refreshLocks = useCallback(async () => {
+    try {
+      const set = await fetchLockedPlayersToday();
+      setLockedPlayers(set);
+      setLockWarning(null);
+      setLockErrorShown(false);
+    } catch (err) {
+      console.warn('[locks] fetch failed', err);
+      setLockWarning("Couldn't verify locks—try again.");
+      if (!lockErrorShown) {
+        Alert.alert('Notice', "Couldn't verify locks—try again.");
+        setLockErrorShown(true);
+      }
+    }
+  }, [lockErrorShown]);
+
+  useEffect(() => {
+    refreshLocks();
+  }, [refreshLocks]);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshLocks();
+    }, [refreshLocks])
+  );
 
   const transfersRemainingRaw = useMemo(() => {
     const base = savedSnapshot?.transfersLeft ?? state.transfersLeft;
@@ -119,17 +157,23 @@ export default function SquadBuilder({ showClose = true }: Props) {
   }, [state.slots]);
 
   const eligiblePlayers = useMemo(() => {
-    if (!activeSlot) return [];
-    const pos = SLOT_POS[activeSlot];
-    return players.filter(p => {
-      if (pos === 'FLEX') return true;
-      return positionToGroup(p.position) === pos;
-    });
-  }, [activeSlot, players]);
+    if (!pickContext) return [];
+    const allowed = pickContext.allowedPositions;
+    return players.filter(p => allowed.includes(positionToGroup(p.position)));
+  }, [pickContext, players]);
 
   const handleSelectPlayer = useCallback(
     (playerId: string) => {
       if (!activeSlot || !isEditing) return;
+      if (lockedPlayers.has(playerId)) {
+        Alert.alert('Locked', 'Locked: this player has a match today.');
+        return;
+      }
+      const alreadyUsedSlot = state.slots.find(s => s.player_id === playerId);
+      if (alreadyUsedSlot && alreadyUsedSlot.slot_key !== activeSlot) {
+        Alert.alert('Player already selected', 'Choose a different player for this slot.');
+        return;
+      }
       const prevPlayer = state.slots.find(s => s.slot_key === activeSlot)?.player_id;
       const wouldUseTransfer = Boolean(prevPlayer && prevPlayer !== playerId);
       if (wouldUseTransfer && transfersRemainingRaw <= 0) {
@@ -139,6 +183,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
       updateSlot(activeSlot, playerId);
       setPickerVisible(false);
       setActiveSlot(null);
+      setPickContext(null);
     },
     [activeSlot, isEditing, state.slots, transfersRemainingRaw, updateSlot]
   );
@@ -156,6 +201,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
         ? player.price
         : null;
     const isCaptain = player?.id && state.captainId === player.id;
+    const isLocked = player?.id ? lockedPlayers.has(player.id) : false;
     const teamCode = formatTeamCode(player?.team ?? '');
     const shortName = formatPlayerShortName(player?.name);
     return (
@@ -165,11 +211,21 @@ export default function SquadBuilder({ showClose = true }: Props) {
         onPress={(e: GestureResponderEvent) => {
           e.stopPropagation();
           if (!isEditing) return;
+          if (isLocked) {
+            Alert.alert('Locked', 'Locked: this player has a match today.');
+            return;
+          }
           if (transfersRemainingRaw <= 0 && filled?.player_id) {
             Alert.alert('No transfers left', 'You have no transfers left to change this player.');
             return;
           }
+          const slotIndex = SLOT_ORDER.indexOf(slot);
+          const slotPos = SLOT_POS[slot];
+          const allowedPositions: ('U' | 'A' | 'V')[] = slotPos === 'FLEX' ? ['U', 'A', 'V'] : [slotPos];
+          const hasCompleteSaved = savedSnapshot?.slots.every(s => s.player_id) ?? false;
+          const mode: 'swap' | 'initial' = hasCompleteSaved ? 'swap' : 'initial';
           setActiveSlot(slot);
+          setPickContext({ slot, slotIndex, allowedPositions, mode });
           setPickerVisible(true);
         }}
       >
@@ -177,6 +233,11 @@ export default function SquadBuilder({ showClose = true }: Props) {
         {isCaptain ? (
           <View style={styles.captainBadge}>
             <Text style={styles.captainBadgeText}>C</Text>
+          </View>
+        ) : null}
+        {isLocked ? (
+          <View style={styles.lockBadge}>
+            <Text style={styles.lockBadgeText}>Locked today</Text>
           </View>
         ) : null}
         {player ? (
@@ -289,6 +350,15 @@ export default function SquadBuilder({ showClose = true }: Props) {
           )}
         </View>
 
+        {lockWarning ? (
+          <View style={styles.banner}>
+            <Text style={styles.bannerText}>{lockWarning}</Text>
+            <TouchableOpacity onPress={refreshLocks}>
+              <Text style={styles.bannerLink}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator />
@@ -389,33 +459,52 @@ export default function SquadBuilder({ showClose = true }: Props) {
           visible={pickerVisible}
           animationType="slide"
           transparent
-          onRequestClose={() => setPickerVisible(false)}
+          onRequestClose={() => {
+            setPickerVisible(false);
+            setActiveSlot(null);
+            setPickContext(null);
+          }}
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Pick player</Text>
-                <TouchableOpacity onPress={() => setPickerVisible(false)} hitSlop={10}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setPickerVisible(false);
+                    setActiveSlot(null);
+                    setPickContext(null);
+                  }}
+                  hitSlop={10}
+                >
                   <Text style={styles.link}>Close</Text>
                 </TouchableOpacity>
               </View>
               <FlatList
                 data={eligiblePlayers}
                 keyExtractor={item => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity style={styles.playerRow} onPress={() => handleSelectPlayer(item.id)}>
-                    <View>
-                      <Text style={styles.playerName}>{item.name}</Text>
-                      <Text style={styles.playerMeta}>
-                        {item.team} · {item.position} ·{' '}
+                renderItem={({ item }) => {
+                  const isLocked = lockedPlayers.has(item.id);
+                  return (
+                    <TouchableOpacity
+                      style={[styles.playerRow, isLocked && styles.playerRowLocked]}
+                      onPress={() => handleSelectPlayer(item.id)}
+                      disabled={isLocked}
+                    >
+                      <View>
+                        <Text style={styles.playerName}>{item.name}</Text>
+                        <Text style={styles.playerMeta}>
+                          {item.team} · {item.position} ·{' '}
+                          {(item.price_final ?? item.price)?.toFixed(1) ?? '--'}
+                        </Text>
+                        {isLocked ? <Text style={styles.lockedLabel}>Locked today</Text> : null}
+                      </View>
+                      <Text style={styles.playerPrice}>
                         {(item.price_final ?? item.price)?.toFixed(1) ?? '--'}
                       </Text>
-                    </View>
-                    <Text style={styles.playerPrice}>
-                      {(item.price_final ?? item.price)?.toFixed(1) ?? '--'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+                    </TouchableOpacity>
+                  );
+                }}
                 ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={{ paddingBottom: 16 }}
@@ -441,32 +530,41 @@ export default function SquadBuilder({ showClose = true }: Props) {
               <FlatList
                 data={captainOptions}
                 keyExtractor={item => item.id}
-                renderItem={({ item }) => (
-                  <TouchableOpacity
-                    style={styles.playerRow}
-                    onPress={() => {
-                      chooseCaptain(item.id).then(result => {
-                        if (!result?.ok && result?.error) {
-                          Alert.alert('Captain change blocked', result.error);
+                renderItem={({ item }) => {
+                  const isLocked = lockedPlayers.has(item.id);
+                  return (
+                    <TouchableOpacity
+                      style={[styles.playerRow, isLocked && styles.playerRowLocked]}
+                      disabled={isLocked}
+                      onPress={() => {
+                        if (isLocked) {
+                          Alert.alert('Locked', 'Locked: this player has a match today.');
+                          return;
                         }
-                        if (result?.ok) {
-                          setCaptainPickerVisible(false);
-                          loadSquad();
-                        }
+                        chooseCaptain(item.id).then(result => {
+                          if (!result?.ok && result?.error) {
+                            Alert.alert('Captain change blocked', result.error);
+                          }
+                          if (result?.ok) {
+                            setCaptainPickerVisible(false);
+                            loadSquad();
+                          }
                         });
-                    }}
-                  >
-                    <View>
-                      <Text style={styles.playerName}>{item.name}</Text>
-                      <Text style={styles.playerMeta}>
-                        {item.team} · {item.position}
+                      }}
+                    >
+                      <View>
+                        <Text style={styles.playerName}>{item.name}</Text>
+                        <Text style={styles.playerMeta}>
+                          {item.team} · {item.position}
+                        </Text>
+                        {isLocked ? <Text style={styles.lockedLabel}>Locked today</Text> : null}
+                      </View>
+                      <Text style={styles.playerPrice}>
+                        {(item.price_final ?? item.price)?.toFixed(1) ?? '--'}
                       </Text>
-                    </View>
-                    <Text style={styles.playerPrice}>
-                      {(item.price_final ?? item.price)?.toFixed(1) ?? '--'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
+                    </TouchableOpacity>
+                  );
+                }}
                 ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
                 contentContainerStyle={{ paddingBottom: 16 }}
                 showsVerticalScrollIndicator={false}
@@ -547,6 +645,26 @@ const styles = StyleSheet.create({
     color: '#F8FAFC',
     fontSize: 20,
     fontWeight: '800',
+  },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#334155',
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 6,
+  },
+  bannerText: {
+    color: '#e5e7eb',
+    flex: 1,
+    marginRight: 8,
+  },
+  bannerLink: {
+    color: '#93c5fd',
+    fontWeight: '700',
   },
   link: {
     color: '#93C5FD',
@@ -654,6 +772,22 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     fontSize: 10,
     fontWeight: '800',
+  },
+  lockBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 8,
+    backgroundColor: 'rgba(249,115,22,0.14)',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.4)',
+  },
+  lockBadgeText: {
+    color: '#f97316',
+    fontSize: 10,
+    fontWeight: '700',
   },
   slotTeamCode: {
     color: '#F8FAFC',
@@ -779,6 +913,15 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 12,
     marginTop: 2,
+  },
+  lockedLabel: {
+    marginTop: 4,
+    color: '#f97316',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  playerRowLocked: {
+    opacity: 0.55,
   },
   playerPrice: {
     color: '#38BDF8',

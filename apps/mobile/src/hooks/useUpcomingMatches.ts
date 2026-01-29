@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
+import { getSupabaseEnv } from '../lib/supabaseClient';
+import { fetchWithTimeout } from '../lib/fetchWithTimeout';
 
 export type UpcomingMatch = {
   id: string;
@@ -19,6 +20,12 @@ export function useUpcomingMatches() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const formatError = (err: { message?: string; code?: string } | null | undefined) => {
+    if (!err) return 'Unknown error';
+    const message = err.message ?? 'Unknown error';
+    return err.code ? `${message} | code=${err.code}` : message;
+  };
+
   const selectColumns = useMemo(
     () =>
       [
@@ -32,49 +39,41 @@ export function useUpcomingMatches() {
   );
 
   const fetchMatches = useCallback(async () => {
-    if (!isSupabaseConfigured()) {
-      setError(
-        'Supabase is not configured. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY.'
-      );
-      return;
-    }
-
     setLoading(true);
     setError(null);
 
     try {
-      const supabase = getSupabaseClient();
+      const { url, anon } = getSupabaseEnv();
       const nowIso = new Date().toISOString();
+      const select = encodeURIComponent(selectColumns);
+      const statusFilter = STATUS_FILTERS.length
+        ? `&status=in.(${STATUS_FILTERS.join(',')})`
+        : '';
+      const requestUrl = `${url}/rest/v1/matches?select=${select}&date=gte.${encodeURIComponent(
+        nowIso
+      )}${statusFilter}&order=date.asc&limit=10`;
 
-      let query = supabase
-        .from('matches')
-        .select(selectColumns)
-        .gte('date', nowIso)
-        .order('date', { ascending: true })
-        .limit(10);
+      const { ok, status, json, text } = await fetchWithTimeout<UpcomingMatch[]>(
+        requestUrl,
+        {
+          headers: {
+            apikey: anon,
+            Authorization: `Bearer ${anon}`,
+            Accept: 'application/json',
+          },
+        },
+        15_000,
+        '[home matches]'
+      );
 
-      if (STATUS_FILTERS.length) {
-        query = query.in('status', STATUS_FILTERS);
+      if (!ok) {
+        throw new Error(`HTTP ${status} ${text}`);
       }
 
-      const { data, error: queryError } = await query;
-      if (queryError) {
-        const looksLikeJoinError = /relationship|foreign|join|column/i.test(queryError.message ?? '');
-        const joinHint = looksLikeJoinError
-          ? "select('id, date, status, home_team:teams!matches_home_team_fkey(name), away_team:teams!matches_away_team_fkey(name)')"
-          : null;
-        const message = joinHint
-          ? `${queryError.message} | Try: ${joinHint}`
-          : queryError.message ?? 'Failed to load upcoming matches';
-        setError(message);
-        console.error('Failed to load upcoming matches', queryError);
-        return;
-      }
-
-      setMatches((data ?? []) as UpcomingMatch[]);
+      setMatches(Array.isArray(json) ? json : []);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load upcoming matches');
-      console.error('Failed to load upcoming matches', e);
+      setError(formatError(e));
+      console.error('[home matches] unexpected error', e);
     } finally {
       setLoading(false);
     }
