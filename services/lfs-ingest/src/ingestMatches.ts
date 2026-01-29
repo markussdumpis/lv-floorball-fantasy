@@ -333,7 +333,16 @@ async function fetchCalendarPages(
 
   while (start < totalRecords) {
     page += 1;
-    console.log(`${LOG_PREFIX} Fetching page`, { monthFilter, start, length: DEFAULT_PAGE_LENGTH, sEcho });
+    console.log(`${LOG_PREFIX} Fetching page`, {
+      ajaxUrl,
+      league,
+      seasonCode,
+      monthFilter,
+      start,
+      length: DEFAULT_PAGE_LENGTH,
+      sEcho,
+      speluVeids,
+    });
     const params = new URLSearchParams({
       url: 'https://www.floorball.lv/lv',
       menu: 'chempionats',
@@ -360,12 +369,20 @@ async function fetchCalendarPages(
     const contentType = headers.get('content-type') ?? 'unknown';
     console.log(`${LOG_PREFIX} Response status ${status}, content-type ${contentType}`);
 
+    const bodyText = body?.toString() ?? '';
+    if (!contentType.toLowerCase().includes('application/json')) {
+      console.error(`${LOG_PREFIX} Unexpected content-type, expected JSON`);
+      console.error(bodyText.slice(0, 500));
+      throw new Error('Expected JSON but received HTML');
+    }
+
     let payload: any;
     try {
-      payload = JSON.parse(body);
+      payload = JSON.parse(bodyText);
     } catch (err) {
       console.error(`${LOG_PREFIX} Failed to parse JSON`, err);
-      break;
+      console.error(bodyText.slice(0, 500));
+      throw err;
     }
 
     const pageTotal = Number(payload?.iTotalRecords ?? payload?.iTotalDisplayRecords ?? 0);
@@ -463,8 +480,7 @@ async function main(): Promise<void> {
   console.log(`${LOG_PREFIX} Total fetched from LFS`, { rows: combinedAaDataCount });
 
   if (!allCalendarRows.length) {
-    console.warn(`${LOG_PREFIX} No calendar rows parsed; exiting`);
-    return;
+    throw new Error('No calendar rows parsed');
   }
 
   const dedupedMap = new Map<string, CalendarRow>();
