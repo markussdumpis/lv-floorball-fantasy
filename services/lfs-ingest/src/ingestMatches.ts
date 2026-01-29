@@ -355,12 +355,17 @@ async function fetchCalendarPages(
       iDisplayStart: String(start),
       iDisplayLength: String(DEFAULT_PAGE_LENGTH),
       sEcho: String(sEcho),
+      start: String(start),
+      length: String(DEFAULT_PAGE_LENGTH),
     });
 
     const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
       method: 'POST',
       headers: {
-        'content-type': 'application/x-www-form-urlencoded',
+        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'x-requested-with': 'XMLHttpRequest',
+        accept: '*/*',
+        referer: 'https://www.floorball.lv/',
         'user-agent': env.userAgent,
         cookie: env.cookie,
       },
