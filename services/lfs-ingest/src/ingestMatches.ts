@@ -325,6 +325,18 @@ async function fetchCalendarPages(
   monthFilter: string,
   speluVeids: string,
 ): Promise<{ aaData: unknown[]; totalRecords: number }> {
+  // Preflight to obtain PHPSESSID like a browser
+  const preflightUrl = `https://www.floorball.lv/lv/2025/chempionats/${league}/kalendars`;
+  const preflight = await fetchWithRetry(preflightUrl, {
+    method: 'GET',
+    headers: {
+      'user-agent': env.userAgent,
+      accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    },
+  });
+  const setCookie = preflight.headers.get('set-cookie') ?? '';
+  const cookieHeader = [env.cookie, setCookie].filter(Boolean).join('; ');
+
   let start = 0;
   let sEcho = 1;
   let totalRecords = Number.POSITIVE_INFINITY;
@@ -344,30 +356,46 @@ async function fetchCalendarPages(
       speluVeids,
     });
     const params = new URLSearchParams({
+      sEcho: String(sEcho),
+      iColumns: '7',
+      sColumns: ',,,,,,',
+      iDisplayStart: String(start),
+      iDisplayLength: String(DEFAULT_PAGE_LENGTH),
+      mDataProp_0: '0',
+      mDataProp_1: '1',
+      mDataProp_2: '2',
+      mDataProp_3: '3',
+      mDataProp_4: '4',
+      mDataProp_5: '5',
+      mDataProp_6: '6',
+      bSortable_0: 'true',
+      bSortable_1: 'true',
+      bSortable_2: 'true',
+      bSortable_3: 'true',
+      bSortable_4: 'true',
+      bSortable_5: 'true',
+      bSortable_6: 'true',
+      iSortingCols: '0',
       url: 'https://www.floorball.lv/lv',
       menu: 'chempionats',
       filtrs_grupa: league,
       filtrs_sezona: seasonCode,
       filtrs_spelu_veids: speluVeids,
       filtrs_menesis: monthFilter,
-      filtrs_komanda: '00',
-      filtrs_majas_viesi: '00',
-      iDisplayStart: String(start),
-      iDisplayLength: String(DEFAULT_PAGE_LENGTH),
-      sEcho: String(sEcho),
-      start: String(start),
-      length: String(DEFAULT_PAGE_LENGTH),
+      filtrs_komanda: '0',
+      filtrs_majas_viesi: '0',
     });
 
     const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
       method: 'POST',
       headers: {
+        accept: 'application/json, text/javascript, */*; q=0.01',
         'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
         'x-requested-with': 'XMLHttpRequest',
-        accept: '*/*',
-        referer: 'https://www.floorball.lv/',
+        origin: 'https://www.floorball.lv',
+        referer: 'https://www.floorball.lv/lv/2025/chempionats/vv/kalendars',
         'user-agent': env.userAgent,
-        cookie: env.cookie,
+        cookie: cookieHeader,
       },
       body: params.toString(),
     });
@@ -376,16 +404,17 @@ async function fetchCalendarPages(
 
     const bodyText = body?.toString() ?? '';
     console.error(`${LOG_PREFIX} Body length: ${bodyText.length}`);
-    if (!contentType.toLowerCase().includes('application/json')) {
-      console.error(`${LOG_PREFIX} Unexpected content-type, expected JSON`);
-      console.error(`${LOG_PREFIX} Body snippet:`);
-      console.error(bodyText.slice(0, 500));
-      throw new Error('Expected JSON but received HTML');
-    }
 
     let payload: any;
     try {
-      payload = JSON.parse(bodyText);
+      const trimmed = bodyText.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        payload = JSON.parse(trimmed);
+      } else {
+        console.error(`${LOG_PREFIX} Body snippet:`);
+        console.error(bodyText.slice(0, 500));
+        throw new Error('Expected JSON but received non-JSON body');
+      }
     } catch (err) {
       console.error(`${LOG_PREFIX} Failed to parse JSON`, err);
       console.error(`${LOG_PREFIX} Body snippet:`);
