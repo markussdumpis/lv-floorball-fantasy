@@ -35,6 +35,7 @@ type TeamRow = { id: string; code: string | null; name: string | null };
 const LOG_PREFIX = '[ingest:matches]';
 const DEFAULT_PAGE_LENGTH = 100;
 const DEFAULT_SPELU_VEIDS = '00';
+const CONFLICT_KEY = 'season,date,home_team,away_team';
 
 function normalize(value: string | null | undefined): string {
   return (value ?? '')
@@ -292,12 +293,11 @@ async function upsertMatches(
     return { upserted: 0, inserted, updated, skipped, scheduledProcessed };
   }
 
-  const conflictKey = 'season,date,home_team,away_team';
-  console.log(`${LOG_PREFIX} Upsert on_conflict key`, { conflictKey });
+  console.log(`${LOG_PREFIX} Upsert on_conflict key`, { conflictKey: CONFLICT_KEY });
 
   const { data, error, count } = await client
     .from('matches')
-    .upsert(rowsToUpsert, { onConflict: conflictKey, ignoreDuplicates: false })
+    .upsert(rowsToUpsert, { onConflict: CONFLICT_KEY, ignoreDuplicates: false })
     .select('id', { count: 'exact' });
 
   if (error) {
@@ -507,6 +507,8 @@ async function fetchMonthOptions(params: {
 }
 
 async function main(): Promise<void> {
+  console.log(`${LOG_PREFIX} version=0e71aab conflictKey=${CONFLICT_KEY}`);
+
   const { season, league } = parseArgs();
   const env = getEnv();
   const supa = createSupabase(env);
