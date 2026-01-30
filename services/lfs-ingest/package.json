@@ -15,7 +15,8 @@
     "cleanup:junk-players": "tsx src/cleanupJunkPlayers.ts",
     "typecheck": "tsc --noEmit",
     "compute:match-points:all": "tsx src/computeMatchPoints.ts --all-finished",
-    "ingest:vv": "tsx src/cli/ingestVV.ts"
+    "ingest:vv": "tsx src/cli/ingestVV.ts",
+    "recompute:user-points": "tsx src/recomputeUserPoints.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.46.0",

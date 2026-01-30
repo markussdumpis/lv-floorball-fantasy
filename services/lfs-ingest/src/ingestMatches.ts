@@ -325,6 +325,11 @@ async function fetchCalendarPages(
   monthFilter: string,
   speluVeids: string,
 ): Promise<{ aaData: unknown[]; totalRecords: number }> {
+  const maxRetries = 5;
+  const baseDelayMs = 500;
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   // Preflight to obtain PHPSESSID like a browser
   const preflightUrl = `https://www.floorball.lv/lv/2025/chempionats/${league}/kalendars`;
   const preflight = await fetchWithRetry(preflightUrl, {
@@ -386,40 +391,53 @@ async function fetchCalendarPages(
       filtrs_majas_viesi: '0',
     });
 
-    const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
-      method: 'POST',
-      headers: {
-        accept: 'application/json, text/javascript, */*; q=0.01',
-        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        'x-requested-with': 'XMLHttpRequest',
-        origin: 'https://www.floorball.lv',
-        referer: 'https://www.floorball.lv/lv/2025/chempionats/vv/kalendars',
-        'user-agent': env.userAgent,
-        cookie: cookieHeader,
-      },
-      body: params.toString(),
-    });
-    const contentType = headers.get('content-type') ?? 'unknown';
-    console.log(`${LOG_PREFIX} Response status ${status}, content-type ${contentType}`);
-
-    const bodyText = body?.toString() ?? '';
-    console.error(`${LOG_PREFIX} Body length: ${bodyText.length}`);
-
     let payload: any;
-    try {
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+      const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json, text/javascript, */*; q=0.01',
+          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'x-requested-with': 'XMLHttpRequest',
+          origin: 'https://www.floorball.lv',
+          referer: 'https://www.floorball.lv/lv/2025/chempionats/vv/kalendars',
+          'user-agent': env.userAgent,
+          cookie: cookieHeader,
+        },
+        body: params.toString(),
+      });
+      const contentType = headers.get('content-type') ?? 'unknown';
+      const bodyText = body?.toString() ?? '';
       const trimmed = bodyText.trim();
-      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-        payload = JSON.parse(trimmed);
+      const attemptInfo = {
+        attempt,
+        status,
+        contentType,
+        bodyLength: bodyText.length,
+      };
+      console.log(`${LOG_PREFIX} Response`, attemptInfo);
+
+      const isJsonLike = trimmed.startsWith('{') || trimmed.startsWith('[');
+      if (!bodyText.length || !isJsonLike) {
+        console.warn(`${LOG_PREFIX} Non-JSON or empty response, will retry`, {
+          ...attemptInfo,
+          monthFilter,
+        });
       } else {
-        console.error(`${LOG_PREFIX} Body snippet:`);
-        console.error(bodyText.slice(0, 500));
-        throw new Error('Expected JSON but received non-JSON body');
+        try {
+          payload = JSON.parse(trimmed);
+          break; // success
+        } catch (err) {
+          console.warn(`${LOG_PREFIX} JSON parse failed, will retry`, { ...attemptInfo, err });
+        }
       }
-    } catch (err) {
-      console.error(`${LOG_PREFIX} Failed to parse JSON`, err);
-      console.error(`${LOG_PREFIX} Body snippet:`);
-      console.error(bodyText.slice(0, 500));
-      throw err;
+
+      if (attempt >= maxRetries) {
+        throw new Error(`Failed to fetch month ${monthFilter}: non-JSON/empty after ${maxRetries} attempts`);
+      }
+      const backoffMs = baseDelayMs * 2 ** (attempt - 1);
+      const jitter = Math.random() * 250;
+      await sleep(backoffMs + jitter);
     }
 
     const pageTotal = Number(payload?.iTotalRecords ?? payload?.iTotalDisplayRecords ?? 0);
@@ -500,10 +518,33 @@ async function main(): Promise<void> {
   const allCalendarRows: CalendarRow[] = [];
   let combinedAaDataCount = 0;
   let totalNoProtocolCount = 0;
+  const successfulMonths: string[] = [];
+  const failedMonths: string[] = [];
 
   for (const monthFilter of monthsToFetch) {
     console.log(`${LOG_PREFIX} Fetching calendar AJAX`, { ajaxUrl, league, seasonCode, monthFilter });
-    const result = await fetchCalendarPages(env, ajaxUrl, league, seasonCode, monthFilter, speluVeids);
+    let result: { aaData: unknown[]; totalRecords: number } | null = null;
+    try {
+      result = await fetchCalendarPages(env, ajaxUrl, league, seasonCode, monthFilter, speluVeids);
+      successfulMonths.push(monthFilter);
+    } catch (err) {
+      failedMonths.push(monthFilter);
+      console.warn(`${LOG_PREFIX} Month fetch failed, skipping`, {
+        monthFilter,
+        league,
+        seasonCode,
+        speluVeids,
+        requestBody: {
+          filtrs_menesis: monthFilter,
+          filtrs_grupa: league,
+          filtrs_sezona: seasonCode,
+          filtrs_spelu_veids: speluVeids,
+        },
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+
     combinedAaDataCount += result.aaData.length;
     console.log(`${LOG_PREFIX} Month ${monthFilter} totals: totalRecords=${result.totalRecords}, totalRowsFetched=${result.aaData.length}`);
 
@@ -515,9 +556,16 @@ async function main(): Promise<void> {
 
   console.log(`${LOG_PREFIX} Total raw rows fetched across months: ${combinedAaDataCount}`);
   console.log(`${LOG_PREFIX} Total fetched from LFS`, { rows: combinedAaDataCount });
+  console.log(`${LOG_PREFIX} Summary per month`, {
+    successful_months: successfulMonths,
+    failed_months: failedMonths,
+    successful_count: successfulMonths.length,
+    failed_count: failedMonths.length,
+  });
 
   if (!allCalendarRows.length) {
-    throw new Error('No calendar rows parsed');
+    console.error(`${LOG_PREFIX} No calendar rows parsed across all months`);
+    process.exit(1);
   }
 
   const dedupedMap = new Map<string, CalendarRow>();
@@ -536,6 +584,11 @@ async function main(): Promise<void> {
   console.log(`${LOG_PREFIX} Parsed rows`, { parsed: parsedMatches.length, noProtocolCount: totalNoProtocolCount });
   console.log(`${LOG_PREFIX} Rows without protocol link: ${totalNoProtocolCount}`);
   console.log(`${LOG_PREFIX} Matches fetched`, { total: parsedMatches.length });
+  console.log(`${LOG_PREFIX} Fetch summary`, {
+    successful_months: successfulMonths,
+    failed_months: failedMonths,
+    total_rows: parsedMatches.length,
+  });
 
   const teams = await loadTeams(supa.client);
   console.log(`${LOG_PREFIX} Loaded ${teams.length} teams for mapping`);
