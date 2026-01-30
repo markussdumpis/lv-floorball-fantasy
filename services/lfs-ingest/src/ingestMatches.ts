@@ -292,9 +292,12 @@ async function upsertMatches(
     return { upserted: 0, inserted, updated, skipped, scheduledProcessed };
   }
 
+  const conflictKey = 'season,date,home_team,away_team';
+  console.log(`${LOG_PREFIX} Upsert on_conflict key`, { conflictKey });
+
   const { data, error, count } = await client
     .from('matches')
-    .upsert(rowsToUpsert, { onConflict: 'season,date,home_team,away_team', ignoreDuplicates: false })
+    .upsert(rowsToUpsert, { onConflict: conflictKey, ignoreDuplicates: false })
     .select('id', { count: 'exact' });
 
   if (error) {
