@@ -506,7 +506,7 @@ async function fetchMonthOptions(params: {
   return values;
 }
 
-async function main(): Promise<void> {
+async function main(): Promise<void | { inserted: number; skipped: boolean }> {
   console.log(`${LOG_PREFIX} version=0e71aab conflictKey=${CONFLICT_KEY}`);
 
   const { season, league } = parseArgs();
@@ -525,6 +525,7 @@ async function main(): Promise<void> {
   let totalNoProtocolCount = 0;
   const successfulMonths: string[] = [];
   const failedMonths: string[] = [];
+  const failedMonthErrors: unknown[] = [];
 
   for (const monthFilter of monthsToFetch) {
     console.log(`${LOG_PREFIX} Fetching calendar AJAX`, { ajaxUrl, league, seasonCode, monthFilter });
@@ -534,6 +535,7 @@ async function main(): Promise<void> {
       successfulMonths.push(monthFilter);
     } catch (err) {
       failedMonths.push(monthFilter);
+      failedMonthErrors.push(err);
       console.warn(`${LOG_PREFIX} Month fetch failed, skipping`, {
         monthFilter,
         league,
@@ -569,6 +571,16 @@ async function main(): Promise<void> {
   });
 
   if (!allCalendarRows.length) {
+    const isNonJsonEmptyError = (error: unknown): boolean => {
+      const message = error instanceof Error ? error.message : String(error);
+      return message.includes('non-JSON/empty');
+    };
+    const allMonthsFailed = successfulMonths.length === 0 && failedMonths.length === monthsToFetch.length;
+    const onlyNonJsonEmpty = allMonthsFailed && failedMonthErrors.every(isNonJsonEmptyError);
+    if (onlyNonJsonEmpty) {
+      console.warn(`${LOG_PREFIX} All months failed, skipping run due to upstream instability`);
+      return { inserted: 0, skipped: true };
+    }
     console.error(`${LOG_PREFIX} No calendar rows parsed across all months`);
     process.exit(1);
   }

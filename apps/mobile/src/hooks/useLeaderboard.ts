@@ -25,6 +25,7 @@ export function useLeaderboard(limit = 3) {
     try {
       const { url, anon } = getSupabaseEnv();
       const requestUrl = `${url}/rest/v1/leaderboard?select=*&order=total_points.desc&limit=${limit}`;
+      console.log('[home leaderboard] request', { requestUrl });
       const { ok, status, json, text } = await fetchWithTimeout<LeaderboardItem[]>(
         requestUrl,
         {
@@ -40,7 +41,13 @@ export function useLeaderboard(limit = 3) {
       if (!ok) {
         throw new Error(`HTTP ${status} ${text}`);
       }
-      setRows(Array.isArray(json) ? json : []);
+      const rows = Array.isArray(json) ? json : [];
+      console.log('[home leaderboard] response', {
+        status,
+        count: rows.length,
+        sample: rows.slice(0, 3),
+      });
+      setRows(rows);
     } catch (e: any) {
       setError(formatError(e));
       console.error('[home leaderboard] unexpected error', e);

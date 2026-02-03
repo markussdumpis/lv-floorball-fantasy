@@ -255,7 +255,11 @@ export default function HomeScreen() {
                     <Text style={styles.leaderboardName}>{getDisplayName(row)}</Text>
                   </View>
                   <Text style={styles.leaderboardPoints}>
-                    {formatPoints(row.total_points)} pts
+                    {(() => {
+                      const points = Number(row.total_points ?? 0);
+                      if (__DEV__) console.log('[leaderboard] row', row.user_id, 'total_points typeof', typeof row.total_points, 'points', points);
+                      return `${points.toFixed(0)} pts`;
+                    })()}
                   </Text>
                 </Pressable>
               ))
@@ -363,7 +367,11 @@ export default function HomeScreen() {
                       <Text style={styles.leaderboardName}>{getDisplayName(row)}</Text>
                     </View>
                     <Text style={styles.leaderboardPoints}>
-                      {formatPoints(row.total_points)} pts
+                      {(() => {
+                        const points = Number(row.total_points ?? 0);
+                        if (__DEV__) console.log('[leaderboard-modal] row', row.user_id, 'typeof', typeof row.total_points, 'points', points);
+                        return `${points.toFixed(0)} pts`;
+                      })()}
                     </Text>
                   </View>
                 ))}

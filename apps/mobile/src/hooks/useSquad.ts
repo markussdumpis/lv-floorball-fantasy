@@ -109,7 +109,9 @@ export function useSquad() {
         limit: 1,
       },
     });
-    return Array.isArray(data) && data[0]?.id ? data[0].id : null;
+    const latestId = Array.isArray(data) && data[0]?.id ? data[0].id : null;
+    console.log('[squad] latest team lookup', { userId, teamId: latestId });
+    return latestId;
   }, []);
 
   const getOrCreateFantasyTeam = useCallback(async (): Promise<string | null> => {
@@ -131,6 +133,7 @@ export function useSquad() {
         timeoutMs: 12_000,
         }
       );
+      console.log('[squad] create team response', { body: data });
 
       // Body may be array, object, or empty
       const fromBody = Array.isArray(data)
@@ -492,18 +495,11 @@ export function useSquad() {
         return fail('Unable to load fantasy team for this account.');
       }
       setTeamId(team);
-
-      const captainId = state.captainId;
-      if (!captainId) {
-        return fail('Pick a captain first.');
-      }
+      console.log('[squad] save begin', { fantasy_team_id: team });
 
       const newIds = state.slots.map(s => s.player_id).filter(Boolean) as string[];
-      let desiredCaptainId: string | null =
-        state.captainId && newIds.includes(state.captainId) ? state.captainId : newIds[0] ?? null;
-      if (!desiredCaptainId) {
-        return fail('Pick a captain first.');
-      }
+      const desiredCaptainId: string | null =
+        state.captainId && newIds.includes(state.captainId) ? state.captainId : null;
 
       // Fetch current active rows
       const { data: activeRows } = await fetchJson<{ player_id: string; is_captain: boolean }[]>(
@@ -551,7 +547,7 @@ export function useSquad() {
           joined_at: new Date().toISOString(),
           left_at: null,
         }));
-        console.log(`[squad] POST fantasy_team_players count=${rosterPayload.length} team=${team}`);
+        console.log(`[squad] roster insert`, { count: rosterPayload.length, fantasy_team_id: team });
         try {
           await fetchJson('/rest/v1/fantasy_team_players?select=fantasy_team_id,player_id,joined_at,left_at,is_captain', {
             requireAuth: true,
@@ -559,7 +555,7 @@ export function useSquad() {
             body: rosterPayload,
             timeoutMs: 12_000,
           });
-          console.log('[squad] roster insert ok');
+          console.log('[squad] roster insert ok', { inserted: rosterPayload.length, fantasy_team_id: team });
         } catch (e: any) {
           console.error('[squad] roster insert failed', e);
           return fail(e?.message ?? 'Failed to save roster players');
@@ -593,7 +589,7 @@ export function useSquad() {
       setState(prev => ({ ...prev, transfersLeft: nextTransfersLeft }));
       setSavedSnapshot(snapshot);
       await persistCache(snapshot);
-      return { ok: true };
+      return { ok: true, needsCaptain: !desiredCaptainId };
     } catch (e: any) {
       console.error('[useSquad] save error', e);
       setError(e?.message ?? 'Failed to save squad');

@@ -1,14 +1,19 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useAuth } from '../../src/providers/AuthProvider';
 import { COLORS } from '../../src/theme/colors';
+import { fetchJson } from '../../src/lib/supabaseRest';
 
 export default function Profile() {
   const { user, loading, signOut } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
+  const [seasonPoints, setSeasonPoints] = useState<number | null>(null);
+  const [rank, setRank] = useState<number | null>(null);
+  const [pointsLoading, setPointsLoading] = useState(false);
 
   const performanceLoading = loading;
+  const season = '2025-26';
 
   const displayName = useMemo(() => {
     const email = user?.email ?? '';
@@ -43,6 +48,53 @@ export default function Profile() {
     ]);
   };
 
+  useEffect(() => {
+    const loadPoints = async () => {
+      if (!user?.id) return;
+      setPointsLoading(true);
+      try {
+        const { data } = await fetchJson<{ total_points: number }[]>('/rest/v1/leaderboard', {
+          requireAuth: true,
+          query: {
+            select: 'total_points',
+            user_id: `eq.${user.id}`,
+            season: `eq.${season}`,
+            limit: 1,
+          },
+          timeoutMs: 12000,
+        });
+        const row = Array.isArray(data) ? data[0] : null;
+        const pts = row?.total_points != null ? Number(row.total_points) : 0;
+        setSeasonPoints(Number.isFinite(pts) ? pts : 0);
+
+        // fetch rank by ordering leaderboard
+        const { data: rankRows } = await fetchJson<{ user_id: string; total_points: number }[]>('/rest/v1/leaderboard', {
+          requireAuth: true,
+          query: {
+            select: 'user_id,total_points',
+            season: `eq.${season}`,
+            order: 'total_points.desc',
+            limit: 2000,
+          },
+          timeoutMs: 12000,
+        });
+        if (Array.isArray(rankRows)) {
+          const idx = rankRows.findIndex(r => r.user_id === user.id);
+          setRank(idx >= 0 ? idx + 1 : null);
+        } else {
+          setRank(null);
+        }
+      } catch (err) {
+        console.warn('[profile] failed to load season points', err);
+        setSeasonPoints(0);
+        setRank(null);
+      } finally {
+        setPointsLoading(false);
+      }
+    };
+    loadPoints();
+  }, [user?.id]);
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -71,9 +123,9 @@ export default function Profile() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Performance snapshot</Text>
         <View style={styles.grid}>
-          <StatCard label="Total points" value={formatStatValue(performanceLoading, 0, '0')} />
-          <StatCard label="Rank" value={formatStatValue(performanceLoading, 'Unranked', 'Unranked')} />
-          <StatCard label="Gameweeks played" value={formatStatValue(performanceLoading, 0, '0')} />
+          <StatCard label="Total points" value={formatStatValue(performanceLoading || pointsLoading, 0, (seasonPoints ?? 0).toString())} />
+          <StatCard label="Place" value={formatStatValue(performanceLoading || pointsLoading, 'Unranked', rank ? `#${rank}` : 'Unranked')} />
+          <StatCard label="Gameweeks played" value={formatStatValue(performanceLoading || pointsLoading, 0, '0')} />
           <StatCard label="Best rank" value={formatStatValue(performanceLoading, 'Not yet ranked', 'Not yet ranked')} />
         </View>
       </View>

@@ -267,19 +267,18 @@ export default function SquadBuilder({ showClose = true }: Props) {
     const filledCount = state.slots.filter(s => s.player_id).length;
     const withinBudget = remainingBudget >= 0;
     const isComplete = filledCount === SLOT_ORDER.length;
-    const hasCaptain = Boolean(state.captainId);
     const hasTransfers = transfersRemainingRaw >= 0;
-    return isEditing && isComplete && withinBudget && hasCaptain && hasTransfers;
-  }, [isEditing, remainingBudget, state.captainId, state.slots, transfersRemainingRaw]);
+    return isEditing && isComplete && withinBudget && hasTransfers;
+  }, [isEditing, remainingBudget, state.slots, transfersRemainingRaw]);
 
   const saveLabel = useMemo(() => {
     const filledCount = state.slots.filter(s => s.player_id).length;
     if (!isEditing) return 'Locked — tap Change players';
-    if (filledCount !== SLOT_ORDER.length || !state.captainId) return 'Complete squad to save';
+    if (filledCount !== SLOT_ORDER.length) return 'Complete squad to save';
     if (remainingBudget < 0) return `Over budget by ${Math.abs(remainingBudget).toFixed(1)}`;
     if (transfersRemainingRaw < 0) return 'No transfers left';
     return pendingTransfersUsed > 0 ? 'Save changes' : 'Save squad';
-  }, [isEditing, pendingTransfersUsed, remainingBudget, state.captainId, state.slots, transfersRemainingRaw]);
+  }, [isEditing, pendingTransfersUsed, remainingBudget, state.slots, transfersRemainingRaw]);
 
   const handleSave = useCallback(async () => {
     if (!isEditing) return;
@@ -295,10 +294,6 @@ export default function SquadBuilder({ showClose = true }: Props) {
       Alert.alert('Incomplete squad', 'Add players to all slots before saving.');
       return;
     }
-    if (!state.captainId) {
-      Alert.alert('Choose a captain', 'Select a captain before saving.');
-      return;
-    }
     if (transfersRemainingRaw < 0) {
       Alert.alert('No transfers left', 'You do not have enough transfers to save these changes.');
       return;
@@ -307,11 +302,16 @@ export default function SquadBuilder({ showClose = true }: Props) {
     if (result?.ok) {
       await loadSquad();
       setIsEditing(false);
-      Alert.alert('Saved', 'Squad saved.');
+      if (result.needsCaptain) {
+        Alert.alert('Saved', 'Squad saved. Pick a captain to finalize.');
+        setCaptainPickerVisible(true);
+      } else {
+        Alert.alert('Saved', 'Squad saved.');
+      }
     } else if (result?.error) {
       Alert.alert('Save failed', result.error);
     }
-  }, [isEditing, loadSquad, remainingBudget, saveSquad, state.captainId, state.slots, transfersRemainingRaw]);
+  }, [isEditing, loadSquad, remainingBudget, saveSquad, state.slots, transfersRemainingRaw]);
 
   const handleChangePlayers = useCallback(() => {
     const availableTransfers = savedSnapshot?.transfersLeft ?? state.transfersLeft;
