@@ -12,14 +12,16 @@ async function main() {
   const season = process.argv[2] || '2025-26';
 
   console.log('[recompute:user-points] season', season);
-  const { error, data } = await client.rpc('recompute_user_season_points', {
-    target_season: season,
-  });
+  console.log('[recompute:user-points] user_season_points is a view; skipping recompute and verifying read access');
+
+  const { error, count } = await client
+    .from('user_season_points')
+    .select('*', { count: 'exact', head: true });
   if (error) {
-    console.error('[recompute:user-points] rpc error', error);
+    console.error('[recompute:user-points] view read error', error);
     process.exit(1);
   }
-  console.log('[recompute:user-points] done', data ?? null);
+  console.log('[recompute:user-points] view row count', count ?? 0);
 }
 
 main().catch((err) => {
