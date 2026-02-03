@@ -134,6 +134,28 @@ async function assertLfsAccess(env: ReturnType<typeof getEnv>): Promise<void> {
   }
 }
 
+async function fetchMatchByExternalId(
+  client: ReturnType<typeof createSupabase>['client'],
+  externalId: string,
+): Promise<MatchRow> {
+  const { data, error } = await client
+    .from('matches')
+    .select('id, external_id, status, season, date')
+    .eq('external_id', externalId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error(`Match not found for external_id ${externalId}`);
+  return data as MatchRow;
+}
+
+function getArgValue(args: string[], flag: string): string | null {
+  const idx = args.indexOf(flag);
+  if (idx !== -1 && args[idx + 1]) return args[idx + 1];
+  const withEq = args.find((a) => a.startsWith(`${flag}=`));
+  if (withEq) return withEq.split('=')[1] ?? null;
+  return null;
+}
+
 async function main() {
   // Fail fast if env missing
   const env = getEnv();
@@ -141,8 +163,45 @@ async function main() {
   const season = '2025-26';
   const args = process.argv.slice(2);
   const backfill = args.includes('--backfill');
+  const matchExternalId = getArgValue(args, '--match');
+
+  if (matchExternalId && backfill) {
+    console.error('[cli] --match and --backfill cannot be used together');
+    process.exit(1);
+  }
 
   await assertLfsAccess(env);
+
+  if (matchExternalId) {
+    console.log('[cli] mode=single-match', { external_id: matchExternalId });
+    try {
+      const match = await fetchMatchByExternalId(supa.client, matchExternalId);
+      console.log('[cli] ingesting single match', { match_id: match.id, external_id: match.external_id, date: match.date });
+      await runCli('npx', ['tsx', 'src/ingestMatchEvents.ts', '--externalId', matchExternalId]);
+      const eventCount = await countMatchEvents(supa.client, match.id);
+      const goalieCount = await countGoalieStats(supa.client, match.id);
+      console.log('[cli] events after ingest', { events: eventCount, goalie_rows: goalieCount });
+
+      console.log('[cli] computing points for single match', { match_id: match.id });
+      await runCli('npx', ['tsx', 'src/computeMatchPoints.ts', '--matchId', match.id]);
+      const pmpCount = await countPlayerMatchPoints(supa.client, match.id);
+      console.log('[cli] player_match_points rows', { count: pmpCount });
+
+      const verifyPlayerId = '98f801e5-ba32-4d00-bf14-bd1f5bf82168';
+      const { count: goalCount } = await supa.client
+        .from('match_events')
+        .select('id', { count: 'exact', head: true })
+        .eq('match_id', match.id)
+        .eq('player_id', verifyPlayerId)
+        .eq('event_type', 'goal');
+      console.log('[cli] verification: goals for Pavel Semenov', { match_id: match.id, goals: goalCount ?? 0 });
+      process.exitCode = 0;
+    } catch (err) {
+      console.error('[cli] single match ingest failed', err);
+      process.exitCode = 1;
+    }
+    return;
+  }
 
   console.log(`[cli] mode=${backfill ? 'backfill' : 'incremental'}`);
 

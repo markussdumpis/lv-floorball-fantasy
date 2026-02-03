@@ -196,25 +196,24 @@ function getArgValue(flag: string): string | null {
   return null;
 }
 
-function parseArgs(): { matchId: string | null; allFinished: boolean } {
+function parseArgs(): { matchId: string | null; externalId: string | null; allFinished: boolean } {
   const matchId = getArgValue('--matchId');
+  const externalId = getArgValue('--externalId');
   const allFinished = process.argv
     .slice(2)
     .some((arg) => arg === '--all-finished' || arg.startsWith('--all-finished='));
 
-  if ((matchId && allFinished) || (!matchId && !allFinished)) {
-    console.error('Usage: npm run ingest:match-events -- --matchId <uuid> | --all-finished');
+  const provided = [Boolean(matchId), Boolean(externalId), allFinished].filter(Boolean).length;
+  if (provided !== 1) {
+    console.error('Usage: npm run ingest:match-events -- --matchId <uuid> | --externalId <ext_id> | --all-finished');
     process.exit(1);
   }
 
-  if (matchId) {
-    console.log(`${LOG_PREFIX} matchId:`, matchId);
-  }
-  if (allFinished) {
-    console.log(`${LOG_PREFIX} all-finished mode enabled`);
-  }
+  if (matchId) console.log(`${LOG_PREFIX} matchId:`, matchId);
+  if (externalId) console.log(`${LOG_PREFIX} externalId:`, externalId);
+  if (allFinished) console.log(`${LOG_PREFIX} all-finished mode enabled`);
 
-  return { matchId, allFinished };
+  return { matchId, externalId, allFinished };
 }
 
 function buildProtocolUrl(externalId: string | null, season: string | null): string | null {
@@ -446,6 +445,24 @@ async function fetchMatch(client: ReturnType<typeof createSupabase>['client'], m
   }
   if (!data) {
     throw new Error(`Match not found for id ${matchId}`);
+  }
+  return data as MatchRow;
+}
+
+async function fetchMatchByExternalId(
+  client: ReturnType<typeof createSupabase>['client'],
+  externalId: string,
+): Promise<MatchRow> {
+  const { data, error } = await client
+    .from('matches')
+    .select('id, external_id, home_team, away_team, date, season')
+    .eq('external_id', externalId)
+    .maybeSingle();
+  if (error) {
+    throw error;
+  }
+  if (!data) {
+    throw new Error(`Match not found for external_id ${externalId}`);
   }
   return data as MatchRow;
 }
@@ -1067,10 +1084,14 @@ async function ingestSingleMatch(
   console.log(`${LOG_PREFIX} Goalie starts parsed: ${parsedGoalieStarts.length}, goalie stat lines parsed: ${parsedGoalieStats.length}`);
 
   console.log(`${LOG_PREFIX} Deleting existing events for match ${match.id}`);
-  const { error: deleteError } = await supa.client.from('match_events').delete().eq('match_id', match.id);
+  const { error: deleteError, count: deletedCount } = await supa.client
+    .from('match_events')
+    .delete({ count: 'exact' })
+    .eq('match_id', match.id);
   if (deleteError) {
     throw deleteError;
   }
+  console.log(`${LOG_PREFIX} Deleted existing events`, { deleted: deletedCount ?? 0 });
 
   if (events.length === 0) {
     console.warn(`${LOG_PREFIX} No events to insert after mapping; exiting`);
@@ -1093,10 +1114,17 @@ async function ingestSingleMatch(
 
   const dedupedEvents = (() => {
     const byKey = new Map<string, typeof events[number]>();
+    const extractRawTime = (raw: unknown): string | null => {
+      if (raw && typeof raw === 'object' && 'time' in (raw as any)) {
+        return String((raw as any).time ?? '');
+      }
+      return null;
+    };
     for (const ev of events) {
-      const key = `${ev.match_id}|${ev.event_type}|${ev.period ?? ''}|${ev.time ?? ''}|${ev.player_id ?? ''}|${
+      const timeKey = ev.ts_seconds ?? extractRawTime(ev.raw) ?? '';
+      const key = `${ev.match_id}|${ev.event_type}|${ev.period ?? ''}|${timeKey}|${ev.player_id ?? ''}|${
         ev.assist_id ?? ''
-      }|${ev.pen_min ?? 0}|${ev.reason ?? ''}`;
+      }|${ev.team_id}`;
       if (!byKey.has(key)) {
         byKey.set(key, ev);
       }
@@ -1107,6 +1135,7 @@ async function ingestSingleMatch(
   console.log(
     `${LOG_PREFIX} events_before=${events.length} events_after=${dedupedEvents.length} removed=${events.length - dedupedEvents.length}`,
   );
+  console.log(`${LOG_PREFIX} events_parsed=${events.length}`);
 
   const dedupedGoalieStats = (() => {
     const byKey = new Map<string, InsertableGoalieStat>();
@@ -1184,7 +1213,7 @@ async function ingestSingleMatch(
 }
 
 async function main(): Promise<void> {
-  const { matchId, allFinished } = parseArgs();
+  const { matchId, externalId, allFinished } = parseArgs();
   const env = getEnv();
   const supa = createSupabase(env);
 
@@ -1272,11 +1301,18 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!matchId) {
-    throw new Error('matchId is required in single-match mode');
+  let resolvedMatchId = matchId;
+  if (!resolvedMatchId && externalId) {
+    const match = await fetchMatchByExternalId(supa.client, externalId);
+    resolvedMatchId = match.id;
+    console.log(`${LOG_PREFIX} Resolved externalId=${externalId} to matchId=${resolvedMatchId}`);
   }
 
-  const match = await fetchMatch(supa.client, matchId);
+  if (!resolvedMatchId) {
+    throw new Error('matchId or externalId is required in single-match mode');
+  }
+
+  const match = await fetchMatch(supa.client, resolvedMatchId);
   const {
     eventsInserted,
     stubPlayersCreatedScorer,
