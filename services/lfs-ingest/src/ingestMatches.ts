@@ -1,4 +1,3 @@
-import { URL } from 'node:url';
 import { getEnv } from './env.js';
 import { fetchWithRetry } from './http.js';
 import { cleanText, loadHtml } from './html.js';
@@ -33,7 +32,6 @@ type ParsedMatch = {
 type TeamRow = { id: string; code: string | null; name: string | null };
 
 const LOG_PREFIX = '[ingest:matches]';
-const DEFAULT_PAGE_LENGTH = 100;
 const DEFAULT_SPELU_VEIDS = '00';
 const CONFLICT_KEY = 'season,date,home_team,away_team';
 
@@ -329,7 +327,9 @@ async function fetchCalendarPages(
   speluVeids: string,
 ): Promise<{ aaData: unknown[]; totalRecords: number }> {
   const maxRetries = 5;
-  const baseDelayMs = 500;
+  const retryDelayMs = 1_500;
+  const browserUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -341,132 +341,90 @@ async function fetchCalendarPages(
       'user-agent': env.userAgent,
       accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(30_000),
   });
   const setCookie = preflight.headers.get('set-cookie') ?? '';
   const cookieHeader = [env.cookie, setCookie].filter(Boolean).join('; ');
 
-  let start = 0;
-  let sEcho = 1;
-  let totalRecords = Number.POSITIVE_INFINITY;
-  const acc: unknown[] = [];
-  let page = 0;
+  const params = new URLSearchParams({
+    filtrs_menesis: monthFilter,
+    filtrs_grupa: league,
+    filtrs_sezona: seasonCode,
+    filtrs_spelu_veids: speluVeids,
+  });
 
-  while (start < totalRecords) {
-    page += 1;
-    console.log(`${LOG_PREFIX} Fetching page`, {
-      ajaxUrl,
-      league,
-      seasonCode,
+  let payload: any;
+  for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+    const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
+        Origin: 'https://www.floorball.lv',
+        Referer: preflightUrl,
+        'User-Agent': env.userAgent || browserUserAgent,
+        'Accept-Language': 'lv-LV,lv;q=0.9,en-US;q=0.8,en;q=0.7',
+        cookie: cookieHeader,
+      },
+      body: params.toString(),
+      redirect: 'follow',
+      signal: AbortSignal.timeout(30_000),
+    });
+    const contentType = headers.get('content-type') ?? 'unknown';
+    const bodyText = body?.toString() ?? '';
+    const trimmed = bodyText.trim();
+    const attemptInfo = {
+      attempt,
+      status,
+      contentType,
+      bodyLength: bodyText.length,
       monthFilter,
-      start,
-      length: DEFAULT_PAGE_LENGTH,
-      sEcho,
-      speluVeids,
-    });
-    const params = new URLSearchParams({
-      sEcho: String(sEcho),
-      iColumns: '7',
-      sColumns: ',,,,,,',
-      iDisplayStart: String(start),
-      iDisplayLength: String(DEFAULT_PAGE_LENGTH),
-      mDataProp_0: '0',
-      mDataProp_1: '1',
-      mDataProp_2: '2',
-      mDataProp_3: '3',
-      mDataProp_4: '4',
-      mDataProp_5: '5',
-      mDataProp_6: '6',
-      bSortable_0: 'true',
-      bSortable_1: 'true',
-      bSortable_2: 'true',
-      bSortable_3: 'true',
-      bSortable_4: 'true',
-      bSortable_5: 'true',
-      bSortable_6: 'true',
-      iSortingCols: '0',
-      url: 'https://www.floorball.lv/lv',
-      menu: 'chempionats',
-      filtrs_grupa: league,
-      filtrs_sezona: seasonCode,
-      filtrs_spelu_veids: speluVeids,
-      filtrs_menesis: monthFilter,
-      filtrs_komanda: '0',
-      filtrs_majas_viesi: '0',
-    });
+    };
+    console.log(`${LOG_PREFIX} Response`, attemptInfo);
 
-    let payload: any;
-    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
-      const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
-        method: 'POST',
-        headers: {
-          accept: 'application/json, text/javascript, */*; q=0.01',
-          'content-type': 'application/x-www-form-urlencoded; charset=UTF-8',
-          'x-requested-with': 'XMLHttpRequest',
-          origin: 'https://www.floorball.lv',
-          referer: 'https://www.floorball.lv/lv/2025/chempionats/vv/kalendars',
-          'user-agent': env.userAgent,
-          cookie: cookieHeader,
-        },
-        body: params.toString(),
+    if (!bodyText.length) {
+      console.warn(`${LOG_PREFIX} Empty response body from AJAX endpoint`, {
+        ...attemptInfo,
+        headers: Object.fromEntries(headers.entries()),
+        bodyPreview: bodyText.slice(0, 200),
       });
-      const contentType = headers.get('content-type') ?? 'unknown';
-      const bodyText = body?.toString() ?? '';
-      const trimmed = bodyText.trim();
-      const attemptInfo = {
-        attempt,
-        status,
-        contentType,
-        bodyLength: bodyText.length,
-      };
-      console.log(`${LOG_PREFIX} Response`, attemptInfo);
+    }
 
-      const isJsonLike = trimmed.startsWith('{') || trimmed.startsWith('[');
-      if (!bodyText.length || !isJsonLike) {
-        console.warn(`${LOG_PREFIX} Non-JSON or empty response, will retry`, {
-          ...attemptInfo,
-          monthFilter,
-        });
-      } else {
-        try {
-          payload = JSON.parse(trimmed);
-          break; // success
-        } catch (err) {
-          console.warn(`${LOG_PREFIX} JSON parse failed, will retry`, { ...attemptInfo, err });
-        }
+    const isHtml = contentType.toLowerCase().includes('text/html');
+    if (isHtml) {
+      console.warn(`${LOG_PREFIX} AJAX returned HTML; request may be blocked or require stricter browser parity`, {
+        ...attemptInfo,
+        headers: Object.fromEntries(headers.entries()),
+        bodyPreview: trimmed.slice(0, 200),
+      });
+    }
+
+    const isJsonLike = trimmed.startsWith('{') || trimmed.startsWith('[');
+    if (!bodyText.length || !isJsonLike) {
+      console.warn(`${LOG_PREFIX} Non-JSON or empty response, will retry`, attemptInfo);
+    } else {
+      try {
+        payload = JSON.parse(trimmed);
+        break;
+      } catch (err) {
+        console.warn(`${LOG_PREFIX} JSON parse failed, will retry`, { ...attemptInfo, err });
       }
-
-      if (attempt >= maxRetries) {
-        throw new Error(`Failed to fetch month ${monthFilter}: non-JSON/empty after ${maxRetries} attempts`);
-      }
-      const backoffMs = baseDelayMs * 2 ** (attempt - 1);
-      const jitter = Math.random() * 250;
-      await sleep(backoffMs + jitter);
     }
 
-    const pageTotal = Number(payload?.iTotalRecords ?? payload?.iTotalDisplayRecords ?? 0);
-    if (!Number.isFinite(totalRecords) || totalRecords === Number.POSITIVE_INFINITY) {
-      totalRecords = pageTotal;
-      console.log(`${LOG_PREFIX} totalRecords from first page: ${totalRecords}`);
+    if (attempt >= maxRetries) {
+      throw new Error(`Failed to fetch month ${monthFilter}: non-JSON/empty after ${maxRetries} attempts`);
     }
-
-    const pageData = Array.isArray(payload?.aaData) ? payload.aaData : [];
-    const pageLength = pageData.length;
-    console.log(`${LOG_PREFIX} Page ${page} aaData length: ${pageLength}`);
-
-    acc.push(...pageData);
-
-    if (pageLength === 0) {
-      break;
-    }
-
-    start += DEFAULT_PAGE_LENGTH;
-    sEcho += 1;
-    if (start >= totalRecords) {
-      break;
-    }
+    const jitter = Math.random() * 200;
+    await sleep(retryDelayMs + jitter);
   }
 
-  return { aaData: acc, totalRecords: Number.isFinite(totalRecords) ? totalRecords : acc.length };
+  const aaData = Array.isArray(payload?.aaData) ? payload.aaData : [];
+  const totalRecords = Number(payload?.iTotalRecords ?? payload?.iTotalDisplayRecords ?? aaData.length ?? 0);
+  console.log(`${LOG_PREFIX} Month ${monthFilter} aaData length`, { rows: aaData.length, totalRecords });
+
+  return { aaData, totalRecords };
 }
 
 async function fetchMonthOptions(params: {
@@ -570,17 +528,30 @@ async function main(): Promise<void | { inserted: number; skipped: boolean }> {
     failed_count: failedMonths.length,
   });
 
+  if (successfulMonths.length === 0) {
+    console.error(`${LOG_PREFIX} All months failed to fetch from upstream`, {
+      failed_months: failedMonths,
+      failed_count: failedMonths.length,
+      successful_count: successfulMonths.length,
+      errors: failedMonthErrors.map((error) => (error instanceof Error ? error.message : String(error))),
+    });
+    process.exitCode = 1;
+    throw new Error('Upstream calendar fetch failed for all requested months');
+  }
+
+  if (combinedAaDataCount === 0 && failedMonths.length > 0) {
+    console.error(`${LOG_PREFIX} Zero rows fetched with upstream month failures`, {
+      successful_months: successfulMonths,
+      failed_months: failedMonths,
+      successful_count: successfulMonths.length,
+      failed_count: failedMonths.length,
+      total_rows: combinedAaDataCount,
+    });
+    process.exitCode = 1;
+    throw new Error('Upstream returned zero rows while one or more month requests failed');
+  }
+
   if (!allCalendarRows.length) {
-    const isNonJsonEmptyError = (error: unknown): boolean => {
-      const message = error instanceof Error ? error.message : String(error);
-      return message.includes('non-JSON/empty');
-    };
-    const allMonthsFailed = successfulMonths.length === 0 && failedMonths.length === monthsToFetch.length;
-    const onlyNonJsonEmpty = allMonthsFailed && failedMonthErrors.every(isNonJsonEmptyError);
-    if (onlyNonJsonEmpty) {
-      console.warn(`${LOG_PREFIX} All months failed, skipping run due to upstream instability`);
-      return { inserted: 0, skipped: true };
-    }
     console.error(`${LOG_PREFIX} No calendar rows parsed across all months`);
     process.exit(1);
   }
