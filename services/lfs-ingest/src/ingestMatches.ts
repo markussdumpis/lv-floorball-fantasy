@@ -34,6 +34,18 @@ type TeamRow = { id: string; code: string | null; name: string | null };
 const LOG_PREFIX = '[ingest:matches]';
 const DEFAULT_SPELU_VEIDS = '00';
 const CONFLICT_KEY = 'season,date,home_team,away_team';
+const BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const DEBUG_INGEST = process.env.INGEST_DEBUG === '1';
+
+function redactSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
+  const redacted = { ...headers };
+  delete redacted.cookie;
+  delete redacted.Cookie;
+  delete redacted['set-cookie'];
+  delete redacted['Set-Cookie'];
+  return redacted;
+}
 
 function normalize(value: string | null | undefined): string {
   return (value ?? '')
@@ -327,9 +339,7 @@ async function fetchCalendarPages(
   speluVeids: string,
 ): Promise<{ aaData: unknown[]; totalRecords: number }> {
   const maxRetries = 5;
-  const retryDelayMs = 1_500;
-  const browserUserAgent =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  const baseBackoffMs = 400;
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -353,21 +363,33 @@ async function fetchCalendarPages(
     filtrs_sezona: seasonCode,
     filtrs_spelu_veids: speluVeids,
   });
+  const requestHeaders: Record<string, string> = {
+    Accept: 'application/json, text/plain, */*',
+    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+    'X-Requested-With': 'XMLHttpRequest',
+    Referer: 'https://www.floorball.lv/',
+    Origin: 'https://www.floorball.lv',
+    'User-Agent': env.userAgent || BROWSER_USER_AGENT,
+    'Accept-Language': 'en-US,en;q=0.9,lv;q=0.8',
+    cookie: cookieHeader,
+  };
+
+  if (DEBUG_INGEST) {
+    const safeHeaders = redactSensitiveHeaders(requestHeaders);
+    console.log(`${LOG_PREFIX} AJAX request debug`, {
+      ajaxUrl,
+      monthFilter,
+      requestBody: Object.fromEntries(params.entries()),
+      headers: safeHeaders,
+    });
+  }
 
   let payload: any;
+  let lastFailureReason = 'unknown';
   for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
     const { body, status, headers } = await fetchWithRetry(ajaxUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-        Accept: 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest',
-        Origin: 'https://www.floorball.lv',
-        Referer: preflightUrl,
-        'User-Agent': env.userAgent || browserUserAgent,
-        'Accept-Language': 'lv-LV,lv;q=0.9,en-US;q=0.8,en;q=0.7',
-        cookie: cookieHeader,
-      },
+      headers: requestHeaders,
       body: params.toString(),
       redirect: 'follow',
       signal: AbortSignal.timeout(30_000),
@@ -382,42 +404,62 @@ async function fetchCalendarPages(
       bodyLength: bodyText.length,
       monthFilter,
     };
-    console.log(`${LOG_PREFIX} Response`, attemptInfo);
+    if (DEBUG_INGEST) {
+      console.log(`${LOG_PREFIX} Response attempt`, attemptInfo);
+    }
 
     if (!bodyText.length) {
+      lastFailureReason = 'empty-body';
       console.warn(`${LOG_PREFIX} Empty response body from AJAX endpoint`, {
         ...attemptInfo,
-        headers: Object.fromEntries(headers.entries()),
+        headers: redactSensitiveHeaders(Object.fromEntries(headers.entries())),
         bodyPreview: bodyText.slice(0, 200),
       });
     }
 
     const isHtml = contentType.toLowerCase().includes('text/html');
     if (isHtml) {
+      lastFailureReason = 'html-response';
       console.warn(`${LOG_PREFIX} AJAX returned HTML; request may be blocked or require stricter browser parity`, {
         ...attemptInfo,
-        headers: Object.fromEntries(headers.entries()),
+        headers: redactSensitiveHeaders(Object.fromEntries(headers.entries())),
         bodyPreview: trimmed.slice(0, 200),
       });
     }
 
     const isJsonLike = trimmed.startsWith('{') || trimmed.startsWith('[');
     if (!bodyText.length || !isJsonLike) {
+      if (bodyText.length && !isJsonLike) {
+        lastFailureReason = 'non-json';
+        console.warn(`${LOG_PREFIX} Non-JSON response preview`, {
+          ...attemptInfo,
+          bodyPreview: trimmed.slice(0, 200),
+        });
+      }
       console.warn(`${LOG_PREFIX} Non-JSON or empty response, will retry`, attemptInfo);
     } else {
       try {
         payload = JSON.parse(trimmed);
         break;
       } catch (err) {
+        lastFailureReason = 'json-parse-failed';
         console.warn(`${LOG_PREFIX} JSON parse failed, will retry`, { ...attemptInfo, err });
       }
     }
 
     if (attempt >= maxRetries) {
+      console.warn(`${LOG_PREFIX} Upstream returned 200 with empty body; likely blocked or upstream bug.`, {
+        monthFilter,
+        league,
+        seasonCode,
+        speluVeids,
+        reason: lastFailureReason,
+      });
       throw new Error(`Failed to fetch month ${monthFilter}: non-JSON/empty after ${maxRetries} attempts`);
     }
-    const jitter = Math.random() * 200;
-    await sleep(retryDelayMs + jitter);
+    const jitter = 250 + Math.floor(Math.random() * 551); // 250-800ms
+    const backoffMs = baseBackoffMs * 2 ** (attempt - 1);
+    await sleep(backoffMs + jitter);
   }
 
   const aaData = Array.isArray(payload?.aaData) ? payload.aaData : [];
@@ -529,26 +571,30 @@ async function main(): Promise<void | { inserted: number; skipped: boolean }> {
   });
 
   if (successfulMonths.length === 0) {
-    console.error(`${LOG_PREFIX} All months failed to fetch from upstream`, {
+    console.warn(`${LOG_PREFIX} skipped ingest due to upstream instability`, {
       failed_months: failedMonths,
       failed_count: failedMonths.length,
       successful_count: successfulMonths.length,
+      league,
+      seasonCode,
+      speluVeids,
       errors: failedMonthErrors.map((error) => (error instanceof Error ? error.message : String(error))),
     });
-    process.exitCode = 1;
-    throw new Error('Upstream calendar fetch failed for all requested months');
+    return { inserted: 0, skipped: true };
   }
 
   if (combinedAaDataCount === 0 && failedMonths.length > 0) {
-    console.error(`${LOG_PREFIX} Zero rows fetched with upstream month failures`, {
+    console.warn(`${LOG_PREFIX} skipped ingest due to upstream instability`, {
       successful_months: successfulMonths,
       failed_months: failedMonths,
       successful_count: successfulMonths.length,
       failed_count: failedMonths.length,
+      league,
+      seasonCode,
+      speluVeids,
       total_rows: combinedAaDataCount,
     });
-    process.exitCode = 1;
-    throw new Error('Upstream returned zero rows while one or more month requests failed');
+    return { inserted: 0, skipped: true };
   }
 
   if (!allCalendarRows.length) {
