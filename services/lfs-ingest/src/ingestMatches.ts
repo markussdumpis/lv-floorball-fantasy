@@ -554,6 +554,11 @@ async function main(): Promise<void | { inserted: number; skipped: boolean }> {
 
   const { season, league } = parseArgs();
   const env = getEnv();
+  const hasCookie = Boolean(env.cookie?.trim());
+  console.log(`${LOG_PREFIX} Request auth headers`, { has_cookie: hasCookie });
+  if (process.env.CI && !hasCookie) {
+    throw new Error('Missing LFS cookie in CI (env.cookie empty)');
+  }
   const supa = createSupabase(env);
   const ajaxUrl = 'https://www.floorball.lv/ajax/ajax_chempionats_kalendars.php';
   const seasonCode = '34';
@@ -577,8 +582,25 @@ async function main(): Promise<void | { inserted: number; skipped: boolean }> {
       result = await fetchCalendarPages(env, ajaxUrl, league, seasonCode, monthFilter, speluVeids);
       successfulMonths.push(monthFilter);
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
       failedMonths.push(monthFilter);
       failedMonthErrors.push(err);
+      if (monthFilter === 'all') {
+        console.warn(`${LOG_PREFIX} Month fetch failed for 'all' (non-fatal); continuing`, {
+          monthFilter,
+          league,
+          seasonCode,
+          speluVeids,
+          requestBody: {
+            filtrs_menesis: monthFilter,
+            filtrs_grupa: league,
+            filtrs_sezona: seasonCode,
+            filtrs_spelu_veids: speluVeids,
+          },
+          error: errorMessage,
+        });
+        continue;
+      }
       console.warn(`${LOG_PREFIX} Month fetch failed, skipping`, {
         monthFilter,
         league,
@@ -590,7 +612,7 @@ async function main(): Promise<void | { inserted: number; skipped: boolean }> {
           filtrs_sezona: seasonCode,
           filtrs_spelu_veids: speluVeids,
         },
-        error: err instanceof Error ? err.message : String(err),
+        error: errorMessage,
       });
       continue;
     }
