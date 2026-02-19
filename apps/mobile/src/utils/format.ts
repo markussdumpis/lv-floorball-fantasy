@@ -3,5 +3,5 @@ export function formatPriceMillions(value: number | null | undefined): string {
     return '--';
   }
 
-  return `${value.toFixed(1)}M`;
+  return `${value.toFixed(1)}k`;
 }

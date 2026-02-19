@@ -249,16 +249,9 @@ export function getSupabaseClient(): SupabaseClient {
           value?.session?.user?.id ??
           null;
 
-        if (token) {
-          console.log('[debug] storage auth token', {
-            storageKey,
-            tokenPrefix: `${token.slice(0, 20)}...`,
-            tokenLen: token.length,
-            hasUser: Boolean(userId),
-          });
-        } else {
-          console.log('[debug] no stored token', { storageKey });
-        }
+        const hasToken = Boolean(token);
+        const hasUser = Boolean(userId);
+        console.log('[debug] storage auth token', { storageKey, hasToken, hasUser });
       })
       .catch(err => {
         clearTimeout(slowLogTimeout);
@@ -269,11 +262,9 @@ export function getSupabaseClient(): SupabaseClient {
     client.auth
       .getSession()
       .then(({ data }) => {
-        const token = data.session?.access_token;
         console.log('[auth] getSession resolved', {
           hasSession: !!data.session,
-          tokenPrefix: token ? `${token.slice(0, 20)}...` : null,
-          tokenLen: token?.length ?? 0,
+          hasToken: !!data.session?.access_token,
         });
       })
       .catch(e => console.log('[auth] getSession error', String(e)));

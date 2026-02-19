@@ -12,65 +12,21 @@ language sql
 security definer
 set search_path = public
 as $$
-with team_ids as (
-  select ft.id as fantasy_team_id, ft.user_id, ft.gameweek_id
-  from public.fantasy_teams ft
-
-  union
-
-  select distinct ftp.fantasy_team_id, ft.user_id, ft.gameweek_id
-  from public.fantasy_team_players ftp
-  join public.fantasy_teams ft on ft.id = ftp.fantasy_team_id
-),
-team_points as (
-  select
-    t.user_id,
-    t.fantasy_team_id,
-    t.gameweek_id,
-    coalesce(sum(
-      case
-        when m.date is not null
-          and ftp.joined_at is not null
-          and m.date >= ftp.joined_at
-          and (ftp.left_at is null or m.date < ftp.left_at)
-        then pmp.fantasy_points::numeric *
-          case when cp.id is not null then 2 else 1 end::numeric
-        else 0::numeric
-      end
-    ), 0::numeric) as total_points
-  from team_ids t
-  left join public.fantasy_team_players ftp on ftp.fantasy_team_id = t.fantasy_team_id
-  left join public.player_match_points pmp on pmp.player_id = ftp.player_id
-  left join public.matches m on m.id = pmp.match_id
-  left join public.fantasy_team_captain_periods cp
-    on cp.fantasy_team_id = t.fantasy_team_id
-   and cp.player_id = ftp.player_id
-   and m.date >= cp.starts_at
-   and (cp.ends_at is null or m.date < cp.ends_at)
-  where t.gameweek_id is not null
-  group by t.user_id, t.fantasy_team_id, t.gameweek_id
-),
-user_gameweek_points as (
-  select
-    user_id,
-    gameweek_id,
-    sum(total_points)::numeric as points
-  from team_points
-  group by user_id, gameweek_id
-)
 select
-  ugp.user_id,
-  ugp.gameweek_id,
-  ugp.points,
-  dense_rank() over (
-    partition by ugp.gameweek_id
-    order by ugp.points desc, ugp.user_id
+  l.user_id,
+  null::uuid as gameweek_id,
+  l.total_points as points,
+  rank() over (
+    partition by l.season
+    order by l.total_points desc
   ) as rank
-from user_gameweek_points ugp;
+from public.leaderboard l;
 $$;
 
 create or replace view public.leaderboard_by_gameweek as
-select * from public.leaderboard_by_gameweek_data();
+select
+  *
+from public.leaderboard_by_gameweek_data();
 
 -- Distinct gameweeks where the user has a team entry.
 create or replace view public.user_gameweeks_played as

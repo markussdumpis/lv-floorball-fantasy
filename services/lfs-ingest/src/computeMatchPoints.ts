@@ -136,19 +136,26 @@ function aggregatePlayerEvents(
   let mvpCount = 0;
 
   for (const ev of events) {
+    const eventMinutes = typeof ev.value === 'number' && Number.isFinite(ev.value) ? ev.value : null;
     if (ev.event_type === 'goal') goals += 1;
     if (ev.event_type === 'save') savesFromEvents += 1;
     if (ev.event_type === 'mvp') mvpCount += 1;
     if (ev.event_type === 'minor_2') {
-      penMin += 2;
+      penMin += eventMinutes ?? 2;
       minorCount += 1;
     }
     if (ev.event_type === 'double_minor') {
-      penMin += 4;
+      penMin += eventMinutes ?? 4;
       doubleMinorCount += 1;
     }
-    if (ev.event_type === 'red_card') redCards += 1;
-    if (ev.event_type === 'misconduct_10') misconduct10 += 1;
+    if (ev.event_type === 'red_card') {
+      penMin += eventMinutes ?? 10;
+      redCards += 1;
+    }
+    if (ev.event_type === 'misconduct_10') {
+      penMin += eventMinutes ?? 10;
+      misconduct10 += 1;
+    }
     if (ev.event_type === 'penalty_shot_scored') penaltyShotScored += 1;
     if (ev.event_type === 'penalty_shot_missed') penaltyShotMissed += 1;
   }

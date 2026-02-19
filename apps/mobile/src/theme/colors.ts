@@ -6,6 +6,9 @@ export const COLORS = {
   text: 'rgba(255,255,255,0.94)',
   muted: 'rgba(255,255,255,0.70)',
   muted2: 'rgba(255,255,255,0.50)',
-  accent: '#A61B2B',    // richer Latvian maroon (more vibrant than before)
+  accent: '#8B1220',    // deeper Latvian flag red
   accent2: '#44D6FF',   // bright ice blue for stats
+  accentMuted: '#9F3A3A',
+  latvianMaroon: '#8B1220',
+  latvianMaroonMuted: '#9F3A3A',
 };

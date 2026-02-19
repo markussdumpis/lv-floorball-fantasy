@@ -569,6 +569,30 @@ function resolveTeamId(teamName: string | null, teams: TeamRow[], homeId: string
   return null;
 }
 
+function extractOwnGoalSourceTeamName(detailsText: string): string | null {
+  const match = detailsText.match(/\(([^)]+)\)/);
+  const teamName = normalizeWhitespace(match?.[1] ?? '');
+  return teamName || null;
+}
+
+function resolveOwnGoalBenefitingTeamId(
+  sourceTeamName: string | null,
+  teams: TeamRow[],
+  match: MatchRow,
+): { benefitingTeamId: string | null; sourceTeamId: string | null } {
+  const sourceTeamId = resolveTeamId(sourceTeamName, teams, match.home_team, match.away_team);
+  if (!sourceTeamId) {
+    return { benefitingTeamId: null, sourceTeamId: null };
+  }
+  if (sourceTeamId === match.home_team) {
+    return { benefitingTeamId: match.away_team, sourceTeamId };
+  }
+  if (sourceTeamId === match.away_team) {
+    return { benefitingTeamId: match.home_team, sourceTeamId };
+  }
+  return { benefitingTeamId: null, sourceTeamId };
+}
+
 function buildPlayerIndex(players: PlayerRow[]): Map<string, string> {
   const map = new Map<string, string>();
   players.forEach((player) => {
@@ -790,6 +814,8 @@ async function ingestSingleMatch(
   let penaltiesInserted = 0;
   let misconductsDetected = 0;
   let redCardsDetected = 0;
+  let ownGoalsDetected = 0;
+  let ownGoalsInserted = 0;
   let goalieStatsInserted = 0;
   const events: InsertableEvent[] = [];
   const goalieStats: InsertableGoalieStat[] = [];
@@ -902,7 +928,40 @@ async function ingestSingleMatch(
 
     const detailsTextLower = (goal.detailsText ?? '').toLowerCase();
     if (detailsTextLower.includes('bumbiņa savos vārtos')) {
-      console.warn(`${LOG_PREFIX} IGNORED_OWN_GOAL_ROW`, { match_id: match.id, raw_row: goal.detailsText });
+      ownGoalsDetected += 1;
+      const sourceTeamName = extractOwnGoalSourceTeamName(goal.detailsText);
+      const resolved = resolveOwnGoalBenefitingTeamId(sourceTeamName, teams, match);
+      const ownGoalTeamId = resolved.benefitingTeamId ?? teamId;
+      if (!resolved.benefitingTeamId) {
+        console.warn(`${LOG_PREFIX} OWN_GOAL_TEAM_FALLBACK_TO_ROW_SIDE`, {
+          match_id: match.id,
+          raw_row: goal.detailsText,
+          source_team_name: sourceTeamName,
+          row_team_id: teamId,
+        });
+      }
+      events.push({
+        match_id: match.id,
+        ts_seconds: parseTimeToSeconds(goal.timeText),
+        period: goal.period,
+        team_id: ownGoalTeamId,
+        player_id: null,
+        assist_id: null,
+        event_type: 'goal',
+        value: 1,
+        raw: {
+          kind: 'own_goal',
+          raw_row: goal.detailsText,
+          source_team_name: sourceTeamName,
+          source_team_id: resolved.sourceTeamId,
+          benefiting_team_id: ownGoalTeamId,
+          time: goal.timeText,
+          type: goal.typeText,
+          scoreText: goal.scoreText,
+        },
+        created_at: new Date().toISOString(),
+      });
+      ownGoalsInserted += 1;
       continue;
     }
 
@@ -1074,12 +1133,14 @@ async function ingestSingleMatch(
   }
 
   console.log(`${LOG_PREFIX} Goals mapped to events: ${events.filter((e) => e.event_type === 'goal').length}`);
+  console.log(`${LOG_PREFIX} Own goals detected: ${ownGoalsDetected}`);
+  console.log(`${LOG_PREFIX} Own goals inserted: ${ownGoalsInserted}`);
   console.log(`${LOG_PREFIX} Penalties detected: ${parsedPenalties.length}`);
   console.log(`${LOG_PREFIX} Penalties inserted: ${penaltiesInserted}`);
   console.log(`${LOG_PREFIX} Misconducts detected: ${misconductsDetected}`);
   console.log(`${LOG_PREFIX} Red cards detected: ${redCardsDetected}`);
   console.log(
-    `${LOG_PREFIX} Summary: rows_scanned=${rowsScanned}, goals_detected=${parsedGoals.length}, penalties_detected=${parsedPenalties.length}, events_insertable=${events.length}, unmapped_scorers=${unmappedPlayers.size}, unmapped_assists=${unmappedAssistCount}, unmapped_penalties=${unmappedPenaltyPlayers}, stub_players_created_scorer=${stubCreatedScorerCount}, stub_players_created_assist=${stubCreatedAssistCount}, stub_players_created_penalty=${stubCreatedPenaltyCount}`,
+    `${LOG_PREFIX} Summary: rows_scanned=${rowsScanned}, goals_detected=${parsedGoals.length}, own_goals_detected=${ownGoalsDetected}, own_goals_inserted=${ownGoalsInserted}, penalties_detected=${parsedPenalties.length}, events_insertable=${events.length}, unmapped_scorers=${unmappedPlayers.size}, unmapped_assists=${unmappedAssistCount}, unmapped_penalties=${unmappedPenaltyPlayers}, stub_players_created_scorer=${stubCreatedScorerCount}, stub_players_created_assist=${stubCreatedAssistCount}, stub_players_created_penalty=${stubCreatedPenaltyCount}`,
   );
   console.log(`${LOG_PREFIX} Goalie starts parsed: ${parsedGoalieStarts.length}, goalie stat lines parsed: ${parsedGoalieStats.length}`);
 
@@ -1109,6 +1170,7 @@ async function ingestSingleMatch(
       penaltiesInserted,
       misconductsDetected,
       redCardsDetected,
+      goalieStatsInserted: 0,
     };
   }
 

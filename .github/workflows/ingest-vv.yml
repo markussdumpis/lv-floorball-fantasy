@@ -63,6 +63,36 @@ jobs:
             npm run ingest:vv
           fi
 
+      - name: Backfill incomplete matches (last 14 days)
+        working-directory: services/lfs-ingest
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LFS_SKATERS_URL: ${{ secrets.LFS_SKATERS_URL }}
+          LFS_GOALIES_URL: ${{ secrets.LFS_GOALIES_URL }}
+          LFS_SKATERS_ENDPOINT: ${{ secrets.LFS_SKATERS_ENDPOINT }}
+          LFS_SKATERS_FORM: ${{ secrets.LFS_SKATERS_FORM }}
+          LFS_GOALIES_ENDPOINT: ${{ secrets.LFS_GOALIES_ENDPOINT }}
+          LFS_GOALIES_FORM: ${{ secrets.LFS_GOALIES_FORM }}
+          LFS_USER_AGENT: ${{ secrets.LFS_USER_AGENT }}
+          LFS_COOKIE: ${{ secrets.LFS_COOKIE }}
+        run: npm run backfill:events -- --days 14
+
+      - name: Parity check season totals (warn-only)
+        working-directory: services/lfs-ingest
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LFS_SKATERS_URL: ${{ secrets.LFS_SKATERS_URL }}
+          LFS_GOALIES_URL: ${{ secrets.LFS_GOALIES_URL }}
+          LFS_SKATERS_ENDPOINT: ${{ secrets.LFS_SKATERS_ENDPOINT }}
+          LFS_SKATERS_FORM: ${{ secrets.LFS_SKATERS_FORM }}
+          LFS_GOALIES_ENDPOINT: ${{ secrets.LFS_GOALIES_ENDPOINT }}
+          LFS_GOALIES_FORM: ${{ secrets.LFS_GOALIES_FORM }}
+          LFS_USER_AGENT: ${{ secrets.LFS_USER_AGENT }}
+          LFS_COOKIE: ${{ secrets.LFS_COOKIE }}
+        run: npm run parity:season-totals -- --season 2025-26
+
       - name: Refresh stats staging
         working-directory: services/lfs-ingest
         env:

@@ -1,5 +1,9 @@
 {
   "dependencies": {
-    "react-native-url-polyfill": "^3.0.0"
+    "react-native-url-polyfill": "^3.0.0",
+    "metro-react-native-babel-transformer": "file:packages/metro-react-native-babel-transformer"
+  },
+  "devDependencies": {
+    "react-native-svg-transformer": "^1.5.3"
   }
 }

@@ -126,7 +126,7 @@ function isSuspicious(match: MatchRow, events: EventCounts | undefined): boolean
   const totalGoals = (match.home_score ?? 0) + (match.away_score ?? 0);
   const ev = events ?? { total: 0, goals: 0 };
   if (ev.total === 0) return true;
-  if (totalGoals > 0 && ev.goals < totalGoals) return true;
+  if (totalGoals > 0 && ev.goals + 1 < totalGoals) return true;
   return false;
 }
 

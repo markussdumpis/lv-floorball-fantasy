@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { useUpcomingMatches } from '../hooks/useUpcomingMatches';
 import { COLORS } from '../theme/colors';
 import dayjs from 'dayjs';
@@ -38,12 +39,27 @@ const TEAM_LOGOS: Record<string, string> = {
   VAL: 'https://uokqnotvnfoqbxdpwbxg.supabase.co/storage/v1/object/public/public-assets/VAL-logo.png',
 };
 
+const PALETTE = {
+  cardSurface: 'rgba(255,255,255,0.04)',
+  cardBorder: 'rgba(255,255,255,0.08)',
+  textPrimary: '#FFFFFF',
+  textSecondary: 'rgba(255,255,255,0.65)',
+  textTertiary: 'rgba(255,255,255,0.45)',
+  primaryRed: COLORS.latvianMaroon,
+  accentRed: COLORS.latvianMaroonMuted,
+  primaryBlue: '#5DBBFF',
+  pointsOffWhite: '#E6EDF3',
+};
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { matches, loading: matchesLoading, error: matchesError } = useUpcomingMatches();
   const { width } = useWindowDimensions();
-  const CARD_WIDTH = Math.min(340, width - 64);
-  const EDGE = Math.max(0, (width - CARD_WIDTH) / 2);
+  const CONTENT_PADDING = S.md; // matches ScrollView horizontal padding
+  const CARD_SHELL_PADDING = S.xs; // padding around matches card
+  const AVAILABLE_WIDTH = width - 2 * (CONTENT_PADDING + CARD_SHELL_PADDING);
+  const CARD_WIDTH = Math.min(332, AVAILABLE_WIDTH - 8); // trim a few px to keep full card visible inside shell
+  const EDGE = Math.max(0, (AVAILABLE_WIDTH - CARD_WIDTH) / 2);
   const ITEM_SPACING = 14;
   const SNAP = CARD_WIDTH + ITEM_SPACING;
   const { rows: leaderboardRows, loading: leaderboardLoading, error: leaderboardError } = useLeaderboard(50);
@@ -54,6 +70,7 @@ export default function HomeScreen() {
   const [showRules, setShowRules] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(false);
   const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
+  const rootScrollRef = useRef<ScrollView | null>(null);
   const watermarkAnim = useRef(new Animated.Value(0)).current;
   const contentHeightRef = useRef(0);
   const viewHeightRef = useRef(0);
@@ -61,6 +78,12 @@ export default function HomeScreen() {
   useEffect(() => {
     console.log('[home] mounted');
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      rootScrollRef.current?.scrollTo({ y: 0, animated: false });
+    }, []),
+  );
 
   const getDisplayName = (row: { nickname: string | null; user_id: string }) => {
     if (row.nickname && row.nickname.trim()) return row.nickname.trim();
@@ -96,38 +119,9 @@ export default function HomeScreen() {
   return (
     <AppBackground>
       <View style={styles.screen}>
-        <View style={[styles.header, { paddingTop: insets.top + S.xs }]}>
-          <Image source={{ uri: LOGO_URL }} style={styles.headerLogo} />
-          <View style={styles.headerButtonRow}>
-            <Pressable
-            style={({ pressed }) => [
-              styles.headerActionButton,
-              styles.headerActionPrimary,
-              styles.headerAction3d,
-              pressed && styles.headerActionPressed,
-            ]}
-              onPress={() => router.push('/squad')}
-              android_ripple={{ color: 'rgba(255,255,255,0.12)', borderless: false }}
-            >
-              <Text style={styles.headerActionPrimaryText}>Build Team</Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [
-                styles.headerActionButton,
-                styles.headerActionSecondary,
-                styles.headerAction3d,
-                pressed && styles.headerActionPressed,
-              ]}
-              onPress={() => router.push('/draft')}
-              android_ripple={{ color: 'rgba(255,255,255,0.08)', borderless: false }}
-            >
-              <Text style={styles.headerActionSecondaryText}>Draft mode</Text>
-            </Pressable>
-          </View>
-        </View>
-
         <ScrollView
-          contentContainerStyle={styles.content}
+          ref={rootScrollRef}
+          contentContainerStyle={[styles.content, { paddingTop: insets.top + S.sm }]}
           showsVerticalScrollIndicator={false}
           onScroll={handleScroll}
           scrollEventThrottle={16}
@@ -138,12 +132,44 @@ export default function HomeScreen() {
             viewHeightRef.current = e.nativeEvent.layout.height;
           }}
         >
+          <View style={styles.header}>
+            <Image source={{ uri: LOGO_URL }} style={styles.headerLogo} />
+            <View style={styles.headerButtonRow}>
+              <Pressable
+              style={({ pressed }) => [
+                styles.headerActionButton,
+                styles.headerActionPrimary,
+                styles.headerAction3d,
+                pressed && styles.headerActionPressed,
+                pressed && { transform: [{ translateY: 1.5 }, { scale: 0.98 }] },
+              ]}
+                onPress={() => router.push('/squad')}
+                android_ripple={{ color: 'rgba(255,255,255,0.12)', borderless: false }}
+              >
+                <Text style={styles.headerActionPrimaryText}>My Team</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.headerActionButton,
+                  styles.headerActionLocked,
+                  styles.headerAction3d,
+                  pressed && styles.headerActionPressed,
+                  pressed && { transform: [{ translateY: 1.5 }, { scale: 0.98 }] },
+                ]}
+                disabled
+              >
+                <Text style={styles.headerActionLockedText}>Draft mode</Text>
+                <Text style={styles.headerActionLockedSub}>Coming soon</Text>
+              </Pressable>
+            </View>
+          </View>
+
           <View style={[styles.card, styles.matchesCardShell]}>
             <View style={styles.cardHeader}>
               <Text style={[styles.cardTitle, styles.matchesTitle]}>Upcoming matches</Text>
-              <TouchableOpacity activeOpacity={0.6} onPress={() => router.push('/fixtures')}>
+              <Pressable hitSlop={8} style={({ pressed }) => pressed && { opacity: 0.7 }} onPress={() => router.push('/fixtures')}>
                 <Text style={styles.cardHint}>See all</Text>
-              </TouchableOpacity>
+              </Pressable>
             </View>
 
           {matchesLoading ? (
@@ -154,12 +180,12 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={[
                 styles.matchesList,
-                { paddingHorizontal: EDGE, alignItems: 'center' },
+                { alignItems: 'center', paddingHorizontal: EDGE },
               ]}
               ItemSeparatorComponent={() => <View style={{ width: ITEM_SPACING }} />}
               snapToInterval={SNAP}
               decelerationRate="fast"
-              snapToAlignment="start"
+              snapToAlignment="center"
               disableIntervalMomentum
               pagingEnabled
               bounces={false}
@@ -182,7 +208,7 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={[
                 styles.matchesList,
-                { paddingHorizontal: EDGE, alignItems: 'center' },
+                { alignItems: 'center', paddingHorizontal: EDGE },
               ]}
               ItemSeparatorComponent={() => <View style={{ width: ITEM_SPACING }} />}
               renderItem={({ item }) => (
@@ -202,19 +228,6 @@ export default function HomeScreen() {
             />
           )}
 
-          {__DEV__ && (
-            <Text
-              style={matchesError ? styles.errorText : styles.debugText}
-              numberOfLines={2}
-              selectable
-            >
-              {matchesLoading
-                ? 'loading…'
-                : matchesError
-                ? `error=${matchesError}`
-                : `matches=${matches.length}`}
-            </Text>
-          )}
         </View>
 
         <Pressable
@@ -265,24 +278,6 @@ export default function HomeScreen() {
               ))
             )}
           </View>
-          {__DEV__ && (
-            <>
-              <Text
-                style={leaderboardError ? styles.errorText : styles.debugText}
-                numberOfLines={2}
-                selectable
-              >
-                {leaderboardLoading
-                  ? 'loading…'
-                  : leaderboardError
-                  ? `error=${leaderboardError}`
-                  : `leaderboard=${leaderboardRows.length}`}
-              </Text>
-              <Text style={styles.debugText} numberOfLines={2} selectable>
-                supabaseUrl={supabaseUrl || 'MISSING'} | anonKey={supabaseAnonStatus}
-              </Text>
-            </>
-          )}
         </Pressable>
 
         <View style={{ height: 40 }} />
@@ -346,13 +341,22 @@ export default function HomeScreen() {
         visible={showLeaderboardModal}
         animationType="slide"
         transparent
-        onRequestClose={() => setShowLeaderboardModal(false)}
+        onRequestClose={() => {
+          setShowLeaderboardModal(false);
+          router.push('/(tabs)');
+        }}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.cardTitle}>Leaderboard</Text>
-              <Pressable onPress={() => setShowLeaderboardModal(false)} hitSlop={10}>
+              <Pressable
+                onPress={() => {
+                  setShowLeaderboardModal(false);
+                  router.push('/(tabs)');
+                }}
+                hitSlop={10}
+              >
                 <Text style={styles.cardHint}>Close</Text>
               </Pressable>
             </View>
@@ -456,57 +460,62 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   content: {
-    paddingVertical: S.sm,
+    paddingVertical: S.md,
     paddingHorizontal: S.md,
-    paddingBottom: 140,
+    paddingBottom: 150,
     gap: S.sm,
   },
   header: {
     flexDirection: 'column',
     alignItems: 'center',
     paddingHorizontal: S.lg,
-    paddingBottom: S.xs,
-    marginBottom: 2,
-    gap: S.xs,
+    paddingBottom: S.md,
+    marginBottom: 6,
+    gap: S.sm,
   },
   headerLogo: {
-    width: '100%',
-    height: 150,
+    width: '93%',
+    height: 140,
     resizeMode: 'contain',
     alignSelf: 'center',
-    marginBottom: S.xs,
+    marginBottom: S.sm,
   },
   headerButtonRow: {
     flexDirection: 'row',
     width: '100%',
     gap: S.md,
-    marginTop: 6,
-    marginBottom: 6,
+    marginTop: 8,
+    marginBottom: 4,
   },
   headerActionButton: {
     flex: 1,
-    height: 50,
-    borderRadius: 16,
-    paddingHorizontal: 16,
+    height: 54,
+    borderRadius: 18,
+    paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerActionPrimary: {
-    backgroundColor: COLORS.accent,
+    backgroundColor: PALETTE.primaryRed,
   },
   headerActionSecondary: {
     backgroundColor: COLORS.accent,
     borderWidth: 0,
     borderColor: 'transparent',
   },
-  headerAction3d: {
-    shadowColor: COLORS.accent,
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 5,
+  headerActionLocked: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 77, 94, 0.35)',
+    borderColor: PALETTE.cardBorder,
+  },
+  headerAction3d: {
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 77, 94, 0.28)',
   },
   headerActionPressed: {
     transform: [{ translateY: 1.5 }],
@@ -514,7 +523,7 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
   headerActionPrimaryText: {
-    color: '#ffffff',
+    color: PALETTE.textPrimary,
     fontSize: 17,
     fontWeight: '800',
     letterSpacing: 0.05,
@@ -525,26 +534,48 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.05,
   },
+  headerActionLockedText: {
+    color: PALETTE.textPrimary,
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.05,
+  },
+  headerActionLockedSub: {
+    color: PALETTE.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.1,
+    marginTop: 2,
+  },
   card: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: PALETTE.cardSurface,
     borderRadius: 18,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: PALETTE.cardBorder,
     gap: 12,
-    shadowColor: '#000000',
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 2,
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 9 },
+    elevation: 7,
   },
   matchesCardShell: {
     padding: S.xs,
     marginTop: S.xs,
   },
   leaderboardCard: {
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 12,
+    backgroundColor: PALETTE.cardSurface,
+    borderWidth: 1,
+    borderColor: PALETTE.cardBorder,
+    borderRadius: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -552,12 +583,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   cardTitle: {
-    color: COLORS.text,
-    fontSize: 16,
+    color: PALETTE.textPrimary,
+    fontSize: 17,
     fontWeight: '700',
   },
   cardHint: {
-    color: COLORS.muted,
+    color: PALETTE.textSecondary,
     fontSize: 12,
   },
   matchesTitle: {
@@ -569,14 +600,15 @@ const styles = StyleSheet.create({
   matchCard: {
     borderRadius: 18,
     padding: 14,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: PALETTE.cardSurface,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
+    borderColor: PALETTE.cardBorder,
     overflow: 'hidden',
   },
   matchRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 6,
   },
   teamColLeft: {
     width: 64,
@@ -616,29 +648,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   teamCode: {
-    color: 'white',
+    color: PALETTE.textPrimary,
     fontSize: 22,
     fontWeight: '800',
     letterSpacing: 1,
   },
   matchVs: {
-    color: 'rgba(255,255,255,0.55)',
+    color: PALETTE.textTertiary,
     fontSize: 14,
     fontWeight: '700',
     letterSpacing: 0.2,
   },
   matchTime: {
     marginTop: 10,
-    fontSize: 18,
+    fontSize: 21,
     fontWeight: '800',
-    color: 'rgba(120,200,255,1)',
+    color: PALETTE.primaryBlue,
     textAlign: 'center',
   },
   matchDate: {
-    marginTop: 6,
-    fontSize: 13,
+    marginTop: 4,
+    fontSize: 12,
     fontWeight: '700',
-    color: 'rgba(255,255,255,0.65)',
+    color: PALETTE.textSecondary,
     textAlign: 'center',
     letterSpacing: 1,
     textTransform: 'uppercase',
@@ -723,10 +755,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 50,
-    paddingVertical: 8,
-    paddingHorizontal: 6,
-    borderRadius: 12,
-    backgroundColor: COLORS.card2,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: PALETTE.cardBorder,
   },
   leaderboardNameBlock: {
     flexDirection: 'row',
@@ -735,25 +769,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   leaderboardBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: COLORS.accent,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: PALETTE.accentRed,
     alignItems: 'center',
     justifyContent: 'center',
   },
   leaderboardBadgeText: {
-    color: '#ffffff',
-    fontSize: 13,
+    color: PALETTE.textPrimary,
+    fontSize: 12,
     fontWeight: '700',
   },
   leaderboardName: {
-    color: COLORS.text,
+    color: PALETTE.textPrimary,
     fontSize: 14,
     fontWeight: '700',
   },
   leaderboardPoints: {
-    color: '#ffffff',
+    color: PALETTE.pointsOffWhite,
     fontSize: 15,
     fontWeight: '800',
   },

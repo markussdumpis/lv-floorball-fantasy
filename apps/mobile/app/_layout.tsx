@@ -1,6 +1,7 @@
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useEffect } from 'react';
+import * as Linking from 'expo-linking';
 import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
 import { COLORS } from '../src/theme/colors';
 
@@ -16,6 +17,25 @@ function AuthGate() {
   const router = useRouter();
   const segments = useSegments();
   const { user, loading, configError } = useAuth();
+
+  useEffect(() => {
+    let mounted = true;
+    const redact = (url: string | null) => {
+      if (!url) return url;
+      return url.replace(/(code|access_token|refresh_token|id_token)=([^&]+)/gi, '$1=[REDACTED]');
+    };
+    Linking.getInitialURL().then(url => {
+      if (!mounted) return;
+      if (__DEV__) console.log('[deeplink] initial', redact(url));
+    });
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      if (__DEV__) console.log('[deeplink] received', redact(url));
+    });
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     if (loading) return;

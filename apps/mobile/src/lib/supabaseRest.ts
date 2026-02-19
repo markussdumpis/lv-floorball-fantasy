@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DIAGNOSTICS_LOGGING, recordApiError, diagLog } from './diagnostics';
 
 export function getSupabaseEnv() {
   const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -13,6 +14,8 @@ function getAuthStorageKey(url: string) {
   const projectRef = new URL(url).hostname.split('.')[0];
   return `sb-${projectRef}-auth-token`;
 }
+
+let lastLoggedAuthState: { hasToken: boolean; hasUser: boolean } | null = null;
 
 export async function getStoredSession(): Promise<{
   storageKey: string;
@@ -45,12 +48,16 @@ export async function getStoredSession(): Promise<{
     parsed?.session?.user?.id ??
     null;
 
-  console.log('[auth] storage token', {
-    storageKey,
-    hasToken: !!token,
-    hasUser: !!userId,
-    rawLen: raw.length,
-  });
+  const hasToken = !!token;
+  const hasUser = !!userId;
+  const stateChanged =
+    !lastLoggedAuthState ||
+    lastLoggedAuthState.hasToken !== hasToken ||
+    lastLoggedAuthState.hasUser !== hasUser;
+  if (stateChanged && (DIAGNOSTICS_LOGGING || __DEV__)) {
+    diagLog('auth_storage_state', { storageKey, hasToken, hasUser });
+    lastLoggedAuthState = { hasToken, hasUser };
+  }
   return { storageKey, raw, token, userId };
 }
 
@@ -58,6 +65,14 @@ export async function getAccessTokenFromStorage(): Promise<string> {
   const { token } = await getStoredSession();
   if (!token) throw new Error('NOT_SIGNED_IN');
   return token;
+}
+
+export function isOfflineError(err: any): boolean {
+  const msg = (err?.message ?? '').toString().toLowerCase();
+  if (msg.includes('network request failed')) return true;
+  if (msg.includes('failed to fetch')) return true;
+  if (err?.name === 'TypeError' && msg.includes('network')) return true;
+  return false;
 }
 
 export async function forceLocalSignOut() {
@@ -96,6 +111,7 @@ type FetchJsonOptions = {
   query?: Record<string, string | number | undefined | null>;
   timeoutMs?: number;
   headers?: Record<string, string>;
+  label?: string;
 };
 
 export async function fetchJson<T = any>(
@@ -137,8 +153,10 @@ export async function fetchJson<T = any>(
   const timer = setTimeout(() => controller.abort(), timeout);
   const started = Date.now();
 
+  let recordedError = false;
+  const endpointLabel = opts.label ?? new URL(finalUrl).pathname;
   try {
-    console.log(`[rest] ${method} ${new URL(finalUrl).pathname} start`);
+    console.log(`[rest] ${method} ${endpointLabel} start`);
     const response = await fetch(finalUrl, {
       method,
       headers,
@@ -156,12 +174,27 @@ export async function fetchJson<T = any>(
     if (!response.ok) {
       const truncated = text.slice(0, 200);
       console.error(
-        `[rest] ${method} ${new URL(finalUrl).pathname} fail ${response.status} in ${elapsed}ms body=${truncated}`
+        `[rest] ${method} ${endpointLabel} fail ${response.status} in ${elapsed}ms body=${truncated}`
       );
+      await recordApiError({
+        endpoint: endpointLabel,
+        status: response.status,
+        message: truncated || `HTTP ${response.status}`,
+      });
+      recordedError = true;
       throw new Error(`HTTP ${response.status}: ${truncated}`);
     }
-    console.log(`[rest] ${method} ${new URL(finalUrl).pathname} ok in ${elapsed}ms`);
+    console.log(`[rest] ${method} ${endpointLabel} ok in ${elapsed}ms`);
     return { data: json as T, headers: response.headers };
+  } catch (err: any) {
+    if (err?.name !== 'AbortError' && !recordedError) {
+      await recordApiError({
+        endpoint: endpointLabel,
+        status: err?.status ?? null,
+        message: err?.message ?? String(err),
+      });
+    }
+    throw err;
   } finally {
     clearTimeout(timer);
   }

@@ -37,7 +37,6 @@ const CONFLICT_KEY = 'season,date,home_team,away_team';
 const BROWSER_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const DEBUG_INGEST = process.env.INGEST_DEBUG === '1';
-const IS_CI = process.env.CI === 'true';
 
 function redactSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
   const redacted = { ...headers };
@@ -645,12 +644,8 @@ async function main(): Promise<void | { inserted: number; skipped: boolean }> {
       speluVeids,
       errors: failedMonthErrors.map((error) => (error instanceof Error ? error.message : String(error))),
     };
-    if (IS_CI) {
-      console.warn(`${LOG_PREFIX} Upstream returned empty/non-JSON for all months - likely blocked or endpoint changed`, summary);
-      console.warn(`${LOG_PREFIX} skipped ingest due to upstream instability`);
-      return { inserted: 0, skipped: true };
-    }
     console.error(`${LOG_PREFIX} Upstream returned empty/non-JSON for all months - likely blocked or endpoint changed`, summary);
+    console.error(`${LOG_PREFIX} FATAL: 0 rows fetched from LFS; likely blocked. Failing job.`);
     process.exitCode = 1;
     throw new Error('All months failed due to upstream instability');
   }
@@ -666,18 +661,16 @@ async function main(): Promise<void | { inserted: number; skipped: boolean }> {
       speluVeids,
       total_rows: combinedAaDataCount,
     };
-    if (IS_CI) {
-      console.warn(`${LOG_PREFIX} skipped ingest due to upstream instability`, summary);
-      return { inserted: 0, skipped: true };
-    }
     console.error(`${LOG_PREFIX} Upstream instability detected with zero fetched rows`, summary);
+    console.error(`${LOG_PREFIX} FATAL: 0 rows fetched from LFS; likely blocked. Failing job.`);
     process.exitCode = 1;
     throw new Error('Zero rows fetched with upstream month failures');
   }
 
   if (combinedAaDataCount === 0 && !allCalendarRows.length && failedMonths.length === 0) {
-    console.log(`${LOG_PREFIX} No new matches for selected filters`);
-    return { inserted: 0, skipped: false };
+    console.error(`${LOG_PREFIX} FATAL: 0 rows fetched from LFS; likely blocked. Failing job.`);
+    process.exitCode = 1;
+    throw new Error('Zero rows fetched from LFS');
   }
 
   if (!allCalendarRows.length) {

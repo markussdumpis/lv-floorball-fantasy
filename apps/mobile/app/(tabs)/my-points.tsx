@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { fetchJson, getStoredSession } from '../../src/lib/supabaseRest';
+import { AppBackground } from '../../src/components/AppBackground';
 
 type PlayerPointsRow = {
   playerId: string;
@@ -85,15 +86,17 @@ export default function MyPointsScreen() {
           timeoutMs: 12_000,
         }
       );
-      const rowsMapped: PlayerPointsRow[] = (pointsRows ?? []).map(row => ({
-        playerId: (row as any).player_id,
-        name: (row as any).name ?? 'Unknown player',
-        position: (row as any).position ?? null,
-        isCaptain: Boolean((row as any).is_captain),
-        basePoints: Number((row as any).base_points ?? 0) || 0,
-        captainBonus: Number((row as any).captain_bonus ?? 0) || 0,
-        totalPoints: Number((row as any).total_points ?? 0) || 0,
-      }));
+      const rowsMapped: PlayerPointsRow[] = (pointsRows ?? [])
+        .map(row => ({
+          playerId: (row as any).player_id,
+          name: (row as any).name ?? 'Unknown player',
+          position: (row as any).position ?? null,
+          isCaptain: Boolean((row as any).is_captain),
+          basePoints: Number((row as any).base_points ?? 0) || 0,
+          captainBonus: Number((row as any).captain_bonus ?? 0) || 0,
+          totalPoints: Number((row as any).total_points ?? 0) || 0,
+        }))
+        .sort((a, b) => b.totalPoints - a.totalPoints);
 
       setRows(rowsMapped);
     } catch (err: any) {
@@ -130,54 +133,71 @@ export default function MyPointsScreen() {
       }
     >
       <View style={styles.rowHeader}>
-        <Text style={styles.playerName}>
-          {item.name} {item.isCaptain ? '(C)' : ''}
-        </Text>
+        <View style={styles.rowTitleWrap}>
+          <Text style={styles.playerName} numberOfLines={1} ellipsizeMode="tail">
+            {item.name}
+          </Text>
+          {item.isCaptain ? (
+            <View style={styles.captainTag}>
+              <Text style={styles.captainTagText}>C</Text>
+            </View>
+          ) : null}
+        </View>
         <Text style={styles.pointsText}>{item.totalPoints.toFixed(2)}</Text>
       </View>
-      <Text style={styles.subText}>
-        Position: {item.position ?? 'Unknown'} • Base: {item.basePoints.toFixed(2)} • Captain bonus: {item.captainBonus.toFixed(2)}
-      </Text>
+      <Text style={styles.subText}>Position: {item.position ?? 'Unknown'}</Text>
+      {item.isCaptain ? (
+        <Text style={styles.captainBonus}>Captain bonus: {item.captainBonus.toFixed(2)}</Text>
+      ) : null}
     </TouchableOpacity>
   );
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator size="large" color="#3B82F6" />
-        <Text style={styles.statusText}>Loading your points…</Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{teamName ?? 'My Points'}</Text>
-      <Text style={styles.totalText}>Season Total: {totalPoints.toFixed(2)}</Text>
-      <Text style={styles.subheader}>Season: 2025-26</Text>
-      {error ? <Text style={styles.errorText}>{error}</Text> : null}
-      <FlatList
-        data={rows}
-        keyExtractor={item => item.playerId}
-        renderItem={renderItem}
-        contentContainerStyle={styles.listContent}
-        ListEmptyComponent={
-          <Text style={styles.statusText}>No players to show. Save a squad to see points.</Text>
-        }
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#3B82F6" />
-        }
-      />
-    </View>
+    <AppBackground variant="home">
+      <View style={styles.container}>
+        {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator size="large" color="#3B82F6" />
+            <Text style={styles.statusText}>Loading your points…</Text>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.title}>{teamName ?? 'My Points'}</Text>
+            <Text style={styles.totalText}>Season Total: {totalPoints.toFixed(2)}</Text>
+            <Text style={styles.subheader}>Season: 2025-26</Text>
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+            <FlatList
+              data={rows}
+              keyExtractor={item => item.playerId}
+              renderItem={renderItem}
+              contentContainerStyle={styles.listContent}
+              ListEmptyComponent={
+                <Text style={styles.statusText}>No players to show. Save a squad to see points.</Text>
+              }
+              refreshControl={
+                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#3B82F6" />
+              }
+              showsVerticalScrollIndicator={false}
+            />
+          </>
+        )}
+      </View>
+    </AppBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
     paddingHorizontal: 16,
-    paddingTop: 24,
+    paddingTop: 42,
+    gap: 6,
+  },
+  loadingBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 40,
+    gap: 10,
   },
   title: {
     color: '#F8FAFC',
@@ -210,15 +230,21 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   listContent: {
-    paddingBottom: 24,
+    paddingBottom: 44,
+    gap: 10,
   },
   row: {
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   rowHeader: {
     flexDirection: 'row',
@@ -226,18 +252,41 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   playerName: {
-    color: '#F8FAFC',
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '700',
   },
   pointsText: {
     color: '#FBBF24',
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '800',
   },
   subText: {
-    color: '#CBD5E1',
+    color: 'rgba(255,255,255,0.78)',
     marginTop: 4,
     fontSize: 13,
+  },
+  captainBonus: {
+    color: '#FFB4B4',
+    marginTop: 2,
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  rowTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 1,
+  },
+  captainTag: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: '#B91C1C',
+  },
+  captainTagText: {
+    color: '#ffffff',
+    fontWeight: '800',
+    fontSize: 12,
   },
 });

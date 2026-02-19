@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import dayjs from 'dayjs';
 import { AppBackground } from '../../src/components/AppBackground';
 import { fetchJson } from '../../src/lib/supabaseRest';
+import { COLORS } from '../../src/theme/colors';
 
 type TeamRef = {
   id?: string;
@@ -24,6 +26,7 @@ export default function FixturesScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<Fixture[]>([]);
+  const insets = useSafeAreaInsets();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -66,13 +69,22 @@ export default function FixturesScreen() {
       }));
   }, [rows]);
 
-  const renderRow = (fixture: Fixture) => {
-    const dateText = fixture.date ? dayjs(fixture.date).format('DD MMM, HH:mm') : 'TBD';
+const renderRow = (fixture: Fixture) => {
+  const dateText = fixture.date ? dayjs(fixture.date).format('DD MMM, HH:mm') : 'TBD';
+  const formatTeamName = (name: string | null | undefined) => {
+    if (!name) return '—';
+    return name
+        .replace(/_/g, ' ')
+        .split(' ')
+        .map(w => (w.length <= 3 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))
+        .join(' ')
+        .trim();
+    };
     return (
       <View style={styles.matchRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.matchTeams}>
-            {(fixture.home?.code ?? fixture.home?.name ?? 'Home')} vs {(fixture.away?.code ?? fixture.away?.name ?? 'Away')}
+          <Text style={styles.matchTeams} numberOfLines={1} ellipsizeMode="tail">
+            {formatTeamName(fixture.home?.code ?? fixture.home?.name ?? 'Home')} vs {formatTeamName(fixture.away?.code ?? fixture.away?.name ?? 'Away')}
           </Text>
           <Text style={styles.matchDate}>{dateText}</Text>
         </View>
@@ -83,7 +95,7 @@ export default function FixturesScreen() {
 
   return (
     <AppBackground variant="home">
-      <View style={styles.screen}>
+      <View style={[styles.screen, { paddingTop: Math.max(insets.top + 8, 24) }]}>
         <Text style={styles.title}>Fixtures</Text>
 
         {loading ? (
@@ -129,14 +141,15 @@ export default function FixturesScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    padding: 16,
-    gap: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 16,
   },
   title: {
     color: '#F8FAFC',
     fontSize: 22,
     fontWeight: '800',
-    marginBottom: 4,
+    marginBottom: 8,
   },
   center: {
     marginTop: 32,
@@ -164,8 +177,8 @@ const styles = StyleSheet.create({
   },
   section: {
     backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 16,
+    padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
@@ -173,12 +186,12 @@ const styles = StyleSheet.create({
     color: '#E2E8F0',
     fontSize: 15,
     fontWeight: '700',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   sectionRow: {
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#1f2937',
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   matchRow: {
     flexDirection: 'row',
@@ -188,7 +201,7 @@ const styles = StyleSheet.create({
   },
   matchTeams: {
     color: '#F8FAFC',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '700',
   },
   matchDate: {
@@ -197,7 +210,16 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   matchStatus: {
-    color: '#38BDF8',
+    color: '#8FB4FF',
     fontWeight: '700',
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    backgroundColor: 'rgba(143,180,255,0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(143,180,255,0.28)',
   },
 });

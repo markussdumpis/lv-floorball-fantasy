@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, GestureResponderEvent } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { COLORS } from '../theme/colors';
 
 type Props = {
   size: number;
@@ -138,8 +139,12 @@ export function SquadShirtSlot({
           </View>
         ) : null}
         {isLocked ? (
-          <View style={styles.lockBadge}>
-            <Text style={styles.lockBadgeText}>Locked</Text>
+          <View style={styles.lockBadgeWrap} pointerEvents="none">
+            <View style={styles.lockBadge}>
+              <Text style={styles.lockBadgeText} numberOfLines={1} allowFontScaling={false}>
+                Locked
+              </Text>
+            </View>
           </View>
         ) : null}
       </Pressable>
@@ -292,21 +297,29 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '700',
   },
+  lockBadgeWrap: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 30,
+  },
   lockBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 8,
-    backgroundColor: 'rgba(249,115,22,0.14)',
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    minWidth: 92,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(139,18,32,0.9)',
     borderWidth: 1,
-    borderColor: 'rgba(249,115,22,0.4)',
+    borderColor: COLORS.latvianMaroonMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
   },
   lockBadgeText: {
-    color: '#f97316',
-    fontSize: 10,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.1,
+    textAlign: 'center',
   },
   position: {
     color: '#FFFFFF',

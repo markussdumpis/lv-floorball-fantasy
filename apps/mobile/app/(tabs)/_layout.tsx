@@ -15,8 +15,8 @@ export default function TabsLayout() {
           borderTopWidth: 1,
           borderTopColor: COLORS.border,
         },
-        tabBarActiveTintColor: COLORS.accent,
-        tabBarInactiveTintColor: COLORS.muted2,
+        tabBarActiveTintColor: COLORS.latvianMaroon,
+        tabBarInactiveTintColor: 'rgba(255,255,255,0.45)',
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '600',
@@ -37,18 +37,21 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Home',
+          unmountOnBlur: true,
         }}
       />
       <Tabs.Screen
         name="squad"
         options={{
           title: 'Squad',
+          unmountOnBlur: true,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
+          unmountOnBlur: true,
         }}
       />
       <Tabs.Screen

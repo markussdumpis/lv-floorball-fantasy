@@ -18,7 +18,8 @@
     "ingest:vv": "tsx src/cli/ingestVV.ts",
     "ingest:match": "tsx src/cli/ingestVV.ts --match",
     "backfill:events": "tsx src/cli/backfillEvents.ts",
-    "recompute:user-points": "tsx src/recomputeUserPoints.ts"
+    "recompute:user-points": "tsx src/recomputeUserPoints.ts",
+    "parity:season-totals": "tsx src/parityCheckSeasonTotals.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.46.0",
