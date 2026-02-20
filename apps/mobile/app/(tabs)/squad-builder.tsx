@@ -57,7 +57,7 @@ type Props = {
   showClose?: boolean;
 };
 
-const positionToGroup = (pos?: string | null): SlotGroup => {
+const positionToGroup = (pos?: string | null): 'U' | 'A' | 'V' => {
   if (!pos) return 'U';
   const normalized = pos.toUpperCase();
   if (normalized === 'U') return 'U';
@@ -307,7 +307,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
         : typeof player?.price === 'number' && !Number.isNaN(player.price)
         ? player.price
         : null;
-    const isCaptain = player?.id && state.captainId === player.id;
+    const isCaptain = Boolean(player?.id && state.captainId === player.id);
     const isLocked = player?.id ? lockedPlayers.has(player.id) : false;
     const teamCode = formatTeamCode(player?.team ?? '');
     const clubCode = teamCode ? teamCode.toUpperCase() : '--';

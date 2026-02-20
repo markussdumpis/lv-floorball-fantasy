@@ -65,7 +65,7 @@ export function getSupabaseClient(): SupabaseClient {
     hasLoggedConfig = true;
   }
 
-  client = createClient(url, anon, {
+  const createdClient = createClient(url, anon, {
     auth: {
       storage: AsyncStorage,
       autoRefreshToken: true,
@@ -76,6 +76,7 @@ export function getSupabaseClient(): SupabaseClient {
       fetch: fetchWithTimeout,
     },
   });
+  client = createdClient;
   console.log('[auth] client ready persistSession=true storage=AsyncStorage');
   console.log('[debug] __DEV__ =', __DEV__);
 
@@ -174,7 +175,7 @@ export function getSupabaseClient(): SupabaseClient {
 
       let currentUserId: string | null = null;
       try {
-        const { data: userData } = await client.auth.getUser();
+        const { data: userData } = await createdClient.auth.getUser();
         currentUserId = userData?.user?.id ?? null;
       } catch (e) {
         console.log('[leaktest] currentUser error', String(e));

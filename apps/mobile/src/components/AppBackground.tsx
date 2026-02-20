@@ -123,9 +123,7 @@ export function AppBackground({ children, variant = 'default', intensity = 1 }: 
     ].map(beam => ({ ...beam, opacity: beam.opacity * intensity }));
   }, [height, width, maxSide, variant, intensity]);
 
-  const baseGradient = useMemo(() => {
-    return ['#041222', '#04192d', '#020c18'];
-  }, []);
+  const baseGradient = useMemo<[string, string, ...string[]]>(() => ['#041222', '#04192d', '#020c18'], []);
 
   return (
     <View style={styles.container}>
@@ -141,7 +139,7 @@ export function AppBackground({ children, variant = 'default', intensity = 1 }: 
         <BlurView intensity={42} tint="dark" style={StyleSheet.absoluteFillObject}>
           {(
             <LinearGradient
-              colors={['rgba(32, 220, 255, 0.22)', 'rgba(0, 0, 0, 0)', 'rgba(26, 180, 140, 0.18)']}
+              colors={['rgba(32, 220, 255, 0.22)', 'rgba(0, 0, 0, 0)', 'rgba(26, 180, 140, 0.18)'] as const}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={[
@@ -158,7 +156,7 @@ export function AppBackground({ children, variant = 'default', intensity = 1 }: 
           )}
           {(
             <LinearGradient
-              colors={['rgba(180, 255, 255, 0.12)', 'rgba(0, 0, 0, 0)']}
+              colors={['rgba(180, 255, 255, 0.12)', 'rgba(0, 0, 0, 0)'] as const}
               start={{ x: 0.2, y: 0 }}
               end={{ x: 0.8, y: 1 }}
               style={[
@@ -176,7 +174,7 @@ export function AppBackground({ children, variant = 'default', intensity = 1 }: 
           {beams.map((beam, idx) => (
                 <LinearGradient
                   key={idx}
-                  colors={beam.colors}
+                  colors={beam.colors as [string, string, ...string[]]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={[
@@ -203,7 +201,7 @@ export function AppBackground({ children, variant = 'default', intensity = 1 }: 
       </View>
 
       <LinearGradient
-        colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.12)', 'rgba(0,0,0,0.5)']}
+        colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.12)', 'rgba(0,0,0,0.5)'] as const}
         locations={[0, 0.45, 1]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}

@@ -43,8 +43,8 @@ export function SquadShirtSlot({
   const circleSize = size;
   const radius = circleSize / 2;
   const gradient = isEmpty
-    ? ['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.05)']
-    : ['rgba(255,255,255,0.14)', 'rgba(255,255,255,0.02)'];
+    ? (['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.05)'] as const)
+    : (['rgba(255,255,255,0.14)', 'rgba(255,255,255,0.02)'] as const);
   const borderColor = 'rgba(255,255,255,0.08)';
   const emptyOpacity = isEmpty ? 0.75 : 1;
 
@@ -90,7 +90,7 @@ export function SquadShirtSlot({
         ) : null}
         {!isCaptain ? (
           <LinearGradient
-            colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0)']}
+            colors={['rgba(255,255,255,0.06)', 'rgba(255,255,255,0)'] as const}
             start={{ x: 0.5, y: 0.15 }}
             end={{ x: 0.5, y: 1 }}
             style={[StyleSheet.absoluteFillObject, { borderRadius: radius }]}
@@ -245,14 +245,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     opacity: 0.7,
     marginLeft: 1,
-  },
-  position: {
-    color: '#FFFFFF',
-    fontWeight: '800',
-    fontSize: 12,
-    lineHeight: 14,
-    letterSpacing: 0.35,
-    textAlign: 'center',
   },
   captainBadge: {
     position: 'absolute',

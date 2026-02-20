@@ -27,7 +27,7 @@ export function usePlayers(initial: PlayerFilters = {}) {
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [teams, setTeams] = useState<string[]>([]);
-  const debounce = useRef<NodeJS.Timeout | null>(null);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pageRef = useRef(0);
 
   const fetchPage = useCallback(

@@ -8,6 +8,7 @@ import {
   Alert,
   Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,6 +25,8 @@ import { useAuth } from '../../src/providers/AuthProvider';
 import { COLORS } from '../../src/theme/colors';
 
 const SEASON = '2025-26';
+const SUPPORT_EMAIL = 'lvfloorballfantasy@gmail.com';
+const DELETE_CONFIRM_TEXT = 'DELETE';
 const LEGAL_DOCS = {
   privacy: {
     title: 'Privacy Policy',
@@ -61,6 +64,10 @@ type ProfileHeaderProps = {
   onEditPress: () => void;
 };
 
+type DeleteAccountResponse = {
+  success?: boolean;
+};
+
 export default function Profile() {
   const { user, loading, signOut } = useAuth();
   const router = useRouter();
@@ -78,6 +85,8 @@ export default function Profile() {
   const [nicknameInput, setNicknameInput] = useState('');
   const [nicknameSaving, setNicknameSaving] = useState(false);
   const [editNicknameVisible, setEditNicknameVisible] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
   const [nicknameSavedAt, setNicknameSavedAt] = useState<number | null>(null);
   const [legalDocKey, setLegalDocKey] = useState<keyof typeof LEGAL_DOCS | null>(null);
   const [legalLoading, setLegalLoading] = useState(false);
@@ -148,10 +157,10 @@ export default function Profile() {
         timeoutId = setTimeout(() => reject(new Error('DELETE_ACCOUNT_TIMEOUT')), timeoutMs);
       });
 
-      let invokeResult: Awaited<ReturnType<typeof supabase.functions.invoke>>;
+      let invokeResult: Awaited<ReturnType<typeof supabase.functions.invoke<DeleteAccountResponse>>>;
       try {
         invokeResult = await Promise.race([
-          supabase.functions.invoke('delete-account', { body: {} }),
+          supabase.functions.invoke<DeleteAccountResponse>('delete-account', { body: {} }),
           timeoutPromise,
         ]);
       } finally {
@@ -163,11 +172,11 @@ export default function Profile() {
       const { data, error } = invokeResult;
       if (error) {
         Alert.alert('Delete account failed', error.message ?? 'Unable to delete account right now.');
-        return;
+        return false;
       }
       if (!data?.success) {
         Alert.alert('Delete account failed', 'Unexpected server response. Please try again.');
-        return;
+        return false;
       }
 
       try {
@@ -179,32 +188,35 @@ export default function Profile() {
       await signOut();
       router.replace('/(auth)/login');
       Alert.alert('Account deleted', 'Your account and personal data were deleted.');
+      return true;
     } catch (e: any) {
       if (e?.message === 'DELETE_ACCOUNT_TIMEOUT') {
         Alert.alert('Delete timed out', 'Please try again in a moment.');
       } else {
         Alert.alert('Delete account failed', e?.message ?? 'Unable to delete account right now.');
       }
+      return false;
     } finally {
       setDeletingData(false);
     }
   };
 
+  const closeDeleteConfirmModal = useCallback(() => {
+    if (deletingData) return;
+    setDeleteConfirmVisible(false);
+    setDeleteConfirmInput('');
+  }, [deletingData]);
+
   const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete account',
-      'This permanently deletes your account and personal data. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete account',
-          style: 'destructive',
-          onPress: () => {
-            void handleDeleteAccountConfirmed();
-          },
-        },
-      ],
-    );
+    setDeleteConfirmInput('');
+    setDeleteConfirmVisible(true);
+  };
+
+  const handleDeleteAccountFromModal = async () => {
+    const success = await handleDeleteAccountConfirmed();
+    if (!success) return;
+    setDeleteConfirmVisible(false);
+    setDeleteConfirmInput('');
   };
 
   useEffect(() => {
@@ -311,6 +323,15 @@ export default function Profile() {
     const build = Constants.expoConfig?.runtimeVersion ?? Constants.expoConfig?.extra?.buildNumber;
     return build ? `${v} (${build})` : v;
   }, []);
+  const supportMailto = useMemo(
+    () =>
+      buildSupportMailto({
+        userEmail: user?.email,
+        platform: Platform.OS,
+        osVersion: Platform.Version,
+      }),
+    [user?.email],
+  );
   const activeLegalDoc = legalDocKey ? LEGAL_DOCS[legalDocKey] : null;
 
   useEffect(() => {
@@ -382,6 +403,30 @@ export default function Profile() {
       Alert.alert('Unable to open browser', 'Please try again later.');
     }
   }, [activeLegalDoc]);
+
+  const handleSupportPress = useCallback(async () => {
+    try {
+      const fallbackMailto = `mailto:${SUPPORT_EMAIL}`;
+      const urlsToTry = [supportMailto, fallbackMailto];
+
+      for (const url of urlsToTry) {
+        const canOpen = await Linking.canOpenURL(url);
+        if (!canOpen) continue;
+        await Linking.openURL(url);
+        return;
+      }
+
+      Alert.alert(
+        'No email app available',
+        `Please set up an email app on this device, or email us at ${SUPPORT_EMAIL}.`,
+      );
+    } catch {
+      Alert.alert(
+        'Unable to open email app',
+        `Please email us at ${SUPPORT_EMAIL} and include details about your issue.`,
+      );
+    }
+  }, [supportMailto]);
 
   const handleVersionTap = () => {
     const next = versionTapCount + 1;
@@ -530,9 +575,9 @@ export default function Profile() {
               <SettingsRow
                 icon="help-buoy-outline"
                 title="Support"
-                value="Coming soon"
-                disabled
-                onPress={() => {}}
+                onPress={() => {
+                  void handleSupportPress();
+                }}
               />
               <SettingsRow
                 icon="log-out-outline"
@@ -606,6 +651,61 @@ export default function Profile() {
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
                     <Text style={styles.saveBtnText}>Save</Text>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          animationType="slide"
+          transparent
+          visible={deleteConfirmVisible}
+          onRequestClose={closeDeleteConfirmModal}
+        >
+          <View style={styles.modalBackdrop}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={closeDeleteConfirmModal} disabled={deletingData} />
+            <View style={styles.sheet}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.sheetTitle}>Delete account</Text>
+              <Text style={styles.sheetSubtitle}>
+                This will permanently delete your account and data. This action cannot be undone.
+              </Text>
+              <TextInput
+                style={styles.sheetInput}
+                placeholder="Type DELETE to confirm"
+                placeholderTextColor={COLORS.muted2}
+                value={deleteConfirmInput}
+                onChangeText={setDeleteConfirmInput}
+                editable={!deletingData}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              <View style={styles.sheetActions}>
+                <Pressable
+                  style={({ pressed }) => [styles.sheetBtn, styles.cancelBtn, pressed && styles.pressed]}
+                  onPress={closeDeleteConfirmModal}
+                  disabled={deletingData}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.sheetBtn,
+                    styles.deleteBtn,
+                    (deleteConfirmInput !== DELETE_CONFIRM_TEXT || deletingData) && styles.sheetBtnDisabled,
+                    (pressed || deletingData) && styles.pressed,
+                  ]}
+                  onPress={() => {
+                    void handleDeleteAccountFromModal();
+                  }}
+                  disabled={deleteConfirmInput !== DELETE_CONFIRM_TEXT || deletingData}
+                >
+                  {deletingData ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.deleteBtnText}>Delete account</Text>
                   )}
                 </Pressable>
               </View>
@@ -695,6 +795,52 @@ function toFiniteNumber(value: number | string | null | undefined) {
 function formatPoints(value: number) {
   return toFiniteNumber(value).toFixed(1);
 }
+
+function buildSupportMailto({
+  userEmail,
+  platform,
+  osVersion,
+}: {
+  userEmail?: string | null;
+  platform: string;
+  osVersion: string | number;
+}) {
+  const appVersion = Constants.expoConfig?.version ?? Constants.nativeApplicationVersion ?? 'unknown';
+  const iosBuild = Constants.expoConfig?.ios?.buildNumber;
+  const androidBuild = Constants.expoConfig?.android?.versionCode;
+  const buildNumber =
+    (platform === 'ios'
+      ? iosBuild
+      : platform === 'android'
+      ? typeof androidBuild === 'number'
+        ? String(androidBuild)
+        : androidBuild
+      : null) ??
+    Constants.nativeBuildVersion ??
+    Constants.expoConfig?.extra?.buildNumber ??
+    'unknown';
+  const platformLabel = platform === 'ios' ? 'iOS' : platform === 'android' ? 'Android' : platform;
+  const lines = [
+    'Hi Support,',
+    '',
+    'Please describe your issue here:',
+    '',
+    '---',
+    'Debug info:',
+    userEmail ? `User email: ${userEmail}` : null,
+    `App version: ${appVersion}`,
+    `Build number: ${buildNumber}`,
+    `Platform: ${platformLabel} ${String(osVersion ?? 'unknown')}`,
+  ].filter(Boolean);
+
+  const subject = encodeURIComponent('Floorball Fantasy – Support');
+  const body = encodeURIComponent(lines.join('\n'));
+  return `mailto:${SUPPORT_EMAIL}?subject=${subject}&body=${body}`;
+}
+
+// Manual test note:
+// tap Delete account -> modal opens -> typing wrong text keeps button disabled ->
+// typing DELETE enables button -> Cancel closes modal and clears input.
 
 function ProfileHeader({ initials, displayName, email, seasonLabel, onEditPress }: ProfileHeaderProps) {
   return (
@@ -1085,6 +1231,17 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
+  },
+  deleteBtn: {
+    backgroundColor: 'rgba(239,68,68,0.92)',
+  },
+  deleteBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  sheetBtnDisabled: {
+    opacity: 0.45,
   },
   pressed: {
     opacity: 0.8,

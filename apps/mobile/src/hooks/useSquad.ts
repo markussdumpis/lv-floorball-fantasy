@@ -56,6 +56,7 @@ type SquadSnapshot = {
   transfersLeft: number;
   season: string;
   playerDetails: SquadState['playerDetails'];
+  teamPoints: number;
   createdAt?: string | null;
   lastTransferGrantAt?: string | null;
   captainNextChangeAt?: string | null;
@@ -214,6 +215,7 @@ export function useSquad() {
         transfersLeft: parsed.transfersLeft ?? DEFAULT_TRANSFERS,
         season: parsed.season ?? DEFAULT_SEASON,
         playerDetails: parsed.playerDetails ?? {},
+        teamPoints: parsed.teamPoints ?? 0,
         createdAt: parsed.createdAt ?? null,
         lastTransferGrantAt: parsed.lastTransferGrantAt ?? null,
         captainNextChangeAt: parsed.captainNextChangeAt ?? null,
@@ -264,6 +266,7 @@ export function useSquad() {
           transfersLeft: DEFAULT_TRANSFERS,
           season: DEFAULT_SEASON,
           playerDetails: {},
+          teamPoints: 0,
           createdAt: new Date().toISOString(),
           lastTransferGrantAt: new Date().toISOString(),
           captainNextChangeAt: null,

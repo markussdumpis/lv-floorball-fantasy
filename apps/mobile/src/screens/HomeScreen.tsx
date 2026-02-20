@@ -333,7 +333,6 @@ export default function HomeScreen() {
                 bottom: Math.max(18, insets.bottom + 10),
               },
             ]}
-            pointerEvents="none"
           />
         </ScrollView>
       </View>

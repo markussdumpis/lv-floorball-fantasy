@@ -37,21 +37,18 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Home',
-          unmountOnBlur: true,
         }}
       />
       <Tabs.Screen
         name="squad"
         options={{
           title: 'Squad',
-          unmountOnBlur: true,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          unmountOnBlur: true,
         }}
       />
       <Tabs.Screen

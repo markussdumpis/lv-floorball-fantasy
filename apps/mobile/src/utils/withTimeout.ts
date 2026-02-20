@@ -1,5 +1,5 @@
 export async function withTimeout<T>(promise: Promise<T>, ms = 10_000): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>;
+  let timer: ReturnType<typeof setTimeout> | null = null;
 
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('TIMEOUT')), ms);
@@ -8,6 +8,6 @@ export async function withTimeout<T>(promise: Promise<T>, ms = 10_000): Promise<
   try {
     return await Promise.race([promise, timeoutPromise]);
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 }

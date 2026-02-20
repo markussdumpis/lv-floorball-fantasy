@@ -16,11 +16,11 @@ type AuthContextValue = {
   user: User | null;
   loading: boolean;
   configError: string | null;
-  signInWithEmail: (email: string, password: string) => Promise<void>;
-  signUpWithEmail: (email: string, password: string) => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
-  setNickname: (nickname: string) => Promise<void>;
-  setNicknameForUser: (userId: string, nickname: string) => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<Session | null>;
+  signUpWithEmail: (email: string, password: string) => Promise<Session | null>;
+  signInWithGoogle: () => Promise<Session | null>;
+  setNickname: (nickname: string) => Promise<string>;
+  setNicknameForUser: (userId: string, nickname: string) => Promise<string>;
   signOut: () => Promise<void>;
 };
 
@@ -233,14 +233,15 @@ export function AuthProvider({ children }: Props) {
     if (!data?.url) throw new Error('No OAuth URL returned from Supabase.');
 
     const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-    const redactedResultUrl = result.url ? redactTokens(result.url) : null;
+    const resultUrl = 'url' in result ? result.url : null;
+    const redactedResultUrl = resultUrl ? redactTokens(resultUrl) : null;
     if (__DEV__) console.log('[oauth] webbrowser result', { type: result.type, url: redactedResultUrl });
-    if (result.type !== 'success' || !result.url) {
+    if (result.type !== 'success' || !resultUrl) {
       throw new Error('Google sign-in was cancelled.');
     }
 
-    const redactedUrl = redactTokens(result.url);
-    const urlObj = new URL(result.url);
+    const redactedUrl = redactTokens(resultUrl);
+    const urlObj = new URL(resultUrl);
     const hasCode = !!urlObj.searchParams.get('code');
     const hasError = !!(urlObj.searchParams.get('error') || urlObj.searchParams.get('error_description'));
     diagLog('oauth_callback_received', { url: redactedUrl, hasCode, hasError });
@@ -269,9 +270,7 @@ export function AuthProvider({ children }: Props) {
     }
 
     diagLog('oauth_pkce_exchange', { hasCode, hasError });
-    const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(
-      result.url
-    );
+    const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(resultUrl);
     if (exchangeError) throw exchangeError;
 
     if (exchangeData.session?.user) {
