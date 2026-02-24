@@ -2,6 +2,12 @@
   "expo": {
     "name": "lv-floorball-fantasy",
     "slug": "lv-floorball-fantasy",
+    "ios": {
+      "bundleIdentifier": "com.markussdumpis.lvfloorballfantasy",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
     "plugins": [
       "expo-router",
       "expo-web-browser"
@@ -12,6 +18,13 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "diagnosticsLogging": "false",
+      "router": {},
+      "eas": {
+        "projectId": "e9296da9-2f35-4a9a-bee2-e26ebd42916d"
+      }
     }
   }
 }

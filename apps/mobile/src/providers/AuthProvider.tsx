@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, createContext, useContext, type ReactNode 
 import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
+import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import type { Session, SupabaseClient, User } from '@supabase/supabase-js';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
@@ -10,6 +11,15 @@ import { forceLocalSignOut } from '../lib/supabaseRest';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 WebBrowser.maybeCompleteAuthSession();
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 
 type AuthContextValue = {
   session: Session | null;
@@ -44,6 +54,40 @@ export function AuthProvider({ children }: Props) {
   const lastProfileEnsuredFor = useRef<string | null>(null);
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const generateNickname = () => `User_${Math.floor(Math.random() * 900000 + 100000)}`;
+
+  useEffect(() => {
+    const registerForPushNotifications = async () => {
+      if (!Constants.isDevice) {
+        console.log('[push] push token unavailable on simulator');
+        return;
+      }
+
+      const permissions = await Notifications.getPermissionsAsync();
+      let finalStatus = permissions.status;
+      if (finalStatus !== 'granted') {
+        const requested = await Notifications.requestPermissionsAsync();
+        finalStatus = requested.status;
+      }
+
+      if (finalStatus !== 'granted') {
+        console.log('[push] permission not granted');
+        return;
+      }
+
+      try {
+        const projectId =
+          Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+        const token = projectId
+          ? await Notifications.getExpoPushTokenAsync({ projectId })
+          : await Notifications.getExpoPushTokenAsync();
+        console.log(`[push] token=${token.data}`);
+      } catch (error) {
+        console.log('[push] push token unavailable on simulator');
+      }
+    };
+
+    void registerForPushNotifications();
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured()) {

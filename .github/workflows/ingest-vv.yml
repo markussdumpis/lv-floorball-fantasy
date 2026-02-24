@@ -10,6 +10,10 @@ on:
   schedule:
     - cron: "0 1 * * *"
 
+concurrency:
+  group: ingest-vv
+  cancel-in-progress: false
+
 jobs:
   ingest:
     runs-on: ubuntu-latest
@@ -28,6 +32,10 @@ jobs:
         working-directory: services/lfs-ingest
         run: npm ci
 
+      - name: Randomized startup delay (schedule only)
+        if: ${{ github.event_name == 'schedule' }}
+        run: sleep $((RANDOM % 600))
+
       - name: Run ingest:matches
         working-directory: services/lfs-ingest
         env:
@@ -41,6 +49,7 @@ jobs:
           LFS_GOALIES_FORM: ${{ secrets.LFS_GOALIES_FORM }}
           LFS_USER_AGENT: ${{ secrets.LFS_USER_AGENT }}
           LFS_COOKIE: ${{ secrets.LFS_COOKIE }}
+          FAIL_ON_ALL_MONTHS_FAILED: ${{ github.event_name == 'schedule' && 'false' || 'true' }}
         run: npm run ingest:matches
 
       - name: Run ingest:vv

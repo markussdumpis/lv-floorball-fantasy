@@ -1,8 +1,61 @@
+import React, { useCallback, useRef } from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { Alert } from 'react-native';
 import { COLORS } from '../../src/theme/colors';
+import { getSquadUnsavedGuard } from '../../src/lib/squadUnsavedGuard';
 
 export default function TabsLayout() {
+  const tabPromptOpenRef = useRef(false);
+
+  const handleProtectedTabPress = useCallback((event: any, navigation: any, targetRouteName: string) => {
+    const state = navigation.getState();
+    const currentRouteName = state?.routes?.[state.index]?.name;
+    if (currentRouteName !== 'squad') return;
+
+    const guard = getSquadUnsavedGuard();
+    if (!guard?.isDirty) return;
+
+    event.preventDefault();
+    if (tabPromptOpenRef.current) return;
+    tabPromptOpenRef.current = true;
+
+    Alert.alert('Unsaved changes', 'You have unsaved squad changes. Save before leaving?', [
+      {
+        text: 'Stay',
+        style: 'cancel',
+        onPress: () => {
+          tabPromptOpenRef.current = false;
+        },
+      },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: () => {
+          tabPromptOpenRef.current = false;
+          void (async () => {
+            await guard.discard();
+            navigation.navigate(targetRouteName);
+          })();
+        },
+      },
+      {
+        text: 'Save',
+        onPress: () => {
+          tabPromptOpenRef.current = false;
+          void (async () => {
+            const result = await guard.save();
+            if (!result?.ok) {
+              Alert.alert('Save failed', result?.error ?? 'Failed to save squad.');
+              return;
+            }
+            navigation.navigate(targetRouteName);
+          })();
+        },
+      },
+    ]);
+  }, []);
+
   return (
     <Tabs
       screenOptions={({ route }) => ({
@@ -38,6 +91,11 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
         }}
+        listeners={({ navigation, route }) => ({
+          tabPress: event => {
+            handleProtectedTabPress(event, navigation, route.name);
+          },
+        })}
       />
       <Tabs.Screen
         name="squad"
@@ -50,6 +108,11 @@ export default function TabsLayout() {
         options={{
           title: 'Profile',
         }}
+        listeners={({ navigation, route }) => ({
+          tabPress: event => {
+            handleProtectedTabPress(event, navigation, route.name);
+          },
+        })}
       />
       <Tabs.Screen
         name="profile/[id]"

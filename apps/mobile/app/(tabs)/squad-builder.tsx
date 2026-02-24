@@ -17,7 +17,7 @@ import {
   Easing,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { useSquad, SquadSlotKey } from '../../src/hooks/useSquad';
@@ -30,6 +30,7 @@ import { diagLog } from '../../src/lib/diagnostics';
 import { COLORS } from '../../src/theme/colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SquadShirtSlot } from '../../src/components/SquadShirtSlot';
+import { setSquadUnsavedGuard } from '../../src/lib/squadUnsavedGuard';
 
 type SlotGroup = 'U' | 'A' | 'V' | 'FLEX';
 
@@ -71,6 +72,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const router = useRouter();
+  const navigation = useNavigation<any>();
   const {
     state,
     savedSnapshot,
@@ -83,7 +85,9 @@ export default function SquadBuilder({ showClose = true }: Props) {
     playersError,
     chooseCaptain,
     resetUnsavedChanges,
+    discardChanges,
     pendingTransfersUsed,
+    isDirty,
     saving,
     loading,
     error,
@@ -98,6 +102,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
   const [pickerVisible, setPickerVisible] = useState(false);
   const [activeSlot, setActiveSlot] = useState<SquadSlotKey | null>(null);
   const [captainPickerVisible, setCaptainPickerVisible] = useState(false);
+  const [activeAction, setActiveAction] = useState<'change' | 'captain' | null>(null);
   const [isEditing, setIsEditing] = useState(true);
   const [pickerSearch, setPickerSearch] = useState('');
   const [filteredEligible, setFilteredEligible] = useState<Player[]>([]);
@@ -107,6 +112,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
   const lockOfflineNotifiedAt = useRef<number>(0);
   const rootScrollRef = useRef<ScrollView | null>(null);
   const formationAnim = useRef(new Animated.Value(0)).current;
+  const leavePromptOpenRef = useRef(false);
 
   useEffect(() => {
     loadSquad();
@@ -379,40 +385,49 @@ export default function SquadBuilder({ showClose = true }: Props) {
     return pendingTransfersUsed > 0 ? 'Save changes' : 'Save squad';
   }, [isEditing, pendingTransfersUsed, remainingBudget, state.slots, transfersRemainingRaw]);
 
-  const handleSave = useCallback(async () => {
-    if (!isEditing) return;
+  const saveForExit = useCallback(async () => {
+    if (!isEditing) return { ok: true as const };
     if (remainingBudget < 0) {
-      Alert.alert(
-        'Over budget',
-        `Adjust your picks to fit within ${SEASON_BUDGET_CREDITS.toFixed(1)}k credits.`
-      );
-      return;
+      return {
+        ok: false as const,
+        error: `Adjust your picks to fit within ${SEASON_BUDGET_CREDITS.toFixed(1)}k credits.`,
+      };
     }
     const filledCount = state.slots.filter(s => s.player_id).length;
     if (filledCount !== SLOT_ORDER.length) {
-      Alert.alert('Incomplete squad', 'Add players to all slots before saving.');
-      return;
+      return { ok: false as const, error: 'Add players to all slots before saving.' };
     }
     if (transfersRemainingRaw < 0) {
-      Alert.alert('No transfers left', 'You do not have enough transfers to save these changes.');
-      return;
+      return { ok: false as const, error: 'You do not have enough transfers to save these changes.' };
     }
     const result = await saveSquad();
     if (result?.ok) {
       await loadSquad();
       setIsEditing(false);
       if (result.needsCaptain) {
-        Alert.alert('Saved', 'Squad saved. Pick a captain to finalize.');
         setCaptainPickerVisible(true);
-      } else {
-        Alert.alert('Saved', 'Squad saved.');
       }
-    } else if (result?.error) {
-      Alert.alert('Save failed', result.error);
+      return { ok: true as const, needsCaptain: Boolean(result.needsCaptain) };
     }
+    return { ok: false as const, error: result?.error ?? 'Failed to save squad.' };
   }, [isEditing, loadSquad, remainingBudget, saveSquad, state.slots, transfersRemainingRaw]);
 
+  const handleSave = useCallback(async () => {
+    const result = await saveForExit();
+    if (!result?.ok) {
+      Alert.alert('Save failed', result?.error ?? 'Failed to save squad.');
+      return;
+    }
+    if (result.needsCaptain) {
+      Alert.alert('Saved', 'Squad saved. Pick a captain to finalize.');
+      return;
+    }
+    setActiveAction(null);
+    Alert.alert('Saved', 'Squad saved.');
+  }, [saveForExit]);
+
   const handleChangePlayers = useCallback(() => {
+    setActiveAction('change');
     const availableTransfers = savedSnapshot?.transfersLeft ?? state.transfersLeft;
     if (availableTransfers <= 0) {
       Alert.alert('No transfers left', 'You cannot replace players without transfers. Captain can still be updated.');
@@ -427,7 +442,78 @@ export default function SquadBuilder({ showClose = true }: Props) {
     resetUnsavedChanges();
     setIsEditing(false);
     setPickerVisible(false);
+    setActiveAction(null);
   }, [resetUnsavedChanges]);
+
+  const promptUnsavedChanges = useCallback(
+    (onDiscard: () => void, onSave: () => void) => {
+      if (leavePromptOpenRef.current) return;
+      leavePromptOpenRef.current = true;
+      Alert.alert('Unsaved changes', 'You have unsaved squad changes. Save before leaving?', [
+        {
+          text: 'Stay',
+          style: 'cancel',
+          onPress: () => {
+            leavePromptOpenRef.current = false;
+          },
+        },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () => {
+            leavePromptOpenRef.current = false;
+            onDiscard();
+          },
+        },
+        {
+          text: 'Save',
+          onPress: () => {
+            leavePromptOpenRef.current = false;
+            onSave();
+          },
+        },
+      ]);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setSquadUnsavedGuard({
+      isDirty,
+      save: saveForExit,
+      discard: discardChanges,
+    });
+    return () => {
+      setSquadUnsavedGuard(null);
+    };
+  }, [discardChanges, isDirty, saveForExit]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event: any) => {
+      if (!isDirty) return;
+      event.preventDefault();
+      promptUnsavedChanges(
+        () => {
+          void (async () => {
+            await discardChanges();
+            navigation.dispatch(event.data.action);
+          })();
+        },
+        () => {
+          void (async () => {
+            const result = await saveForExit();
+            if (!result?.ok) {
+              Alert.alert('Save failed', result?.error ?? 'Failed to save squad.');
+              return;
+            }
+            navigation.dispatch(event.data.action);
+          })();
+        },
+      );
+    });
+
+    return unsubscribe;
+  }, [discardChanges, isDirty, navigation, promptUnsavedChanges, saveForExit]);
 
   const captainOptions = useMemo(() => {
     return selectedPlayers as Player[];
@@ -547,13 +633,22 @@ export default function SquadBuilder({ showClose = true }: Props) {
         </Pressable>
 
     <View style={styles.actionRow}>
-      <TouchableOpacity style={[styles.primaryButton, styles.actionButton]} onPress={handleChangePlayers} activeOpacity={0.88}>
+      <TouchableOpacity
+        style={[
+          styles.primaryButton,
+          styles.actionButton,
+          activeAction === 'change' && isEditing && styles.actionButtonActive,
+        ]}
+        onPress={handleChangePlayers}
+        activeOpacity={0.88}
+      >
         <Text style={styles.primaryText}>Change players</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={[
           styles.captainButton,
           styles.actionButton,
+          activeAction === 'captain' && captainPickerVisible && styles.actionButtonActive,
           !captainOptions.length && styles.secondaryDisabled,
         ]}
         disabled={!captainOptions.length}
@@ -566,6 +661,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
             Alert.alert('Captain change', `You can change your captain in ${captainDaysLeft} day${captainDaysLeft === 1 ? '' : 's'}.`);
             return;
           }
+          setActiveAction('captain');
           setCaptainPickerVisible(true);
         }}
         activeOpacity={0.82}
@@ -707,13 +803,22 @@ export default function SquadBuilder({ showClose = true }: Props) {
           visible={captainPickerVisible}
           animationType="slide"
           transparent
-          onRequestClose={() => setCaptainPickerVisible(false)}
+          onRequestClose={() => {
+            setCaptainPickerVisible(false);
+            setActiveAction(null);
+          }}
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Choose captain</Text>
-                <TouchableOpacity onPress={() => setCaptainPickerVisible(false)} hitSlop={10}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setCaptainPickerVisible(false);
+                    setActiveAction(null);
+                  }}
+                  hitSlop={10}
+                >
                   <Text style={styles.link}>Close</Text>
                 </TouchableOpacity>
               </View>
@@ -737,6 +842,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
                           }
                           if (result?.ok) {
                             setCaptainPickerVisible(false);
+                            setActiveAction(null);
                             loadSquad();
                           }
                         });
@@ -874,6 +980,11 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
+  },
+  actionButtonActive: {
+    backgroundColor: 'rgba(120, 24, 40, 0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   captainHelper: {
     color: 'rgba(255,255,255,0.72)',

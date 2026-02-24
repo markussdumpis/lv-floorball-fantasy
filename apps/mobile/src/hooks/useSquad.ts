@@ -62,6 +62,15 @@ type SquadSnapshot = {
   captainNextChangeAt?: string | null;
 };
 
+const areSlotsEqual = (a: SquadSlot[], b: SquadSlot[]) => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i]?.slot_key !== b[i]?.slot_key) return false;
+    if (a[i]?.player_id !== b[i]?.player_id) return false;
+  }
+  return true;
+};
+
 export function useSquad() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [state, setState] = useState<SquadState>({
@@ -795,6 +804,12 @@ export function useSquad() {
   }, [playerMap, state.playerDetails, state.slots]);
 
   const remainingBudget = SEASON_BUDGET_CREDITS - totalCost;
+  const isDirty = useMemo(() => {
+    if (!savedSnapshot) return false;
+    if (state.captainId !== savedSnapshot.captainId) return true;
+    if (!areSlotsEqual(state.slots, savedSnapshot.slots)) return true;
+    return false;
+  }, [savedSnapshot, state.captainId, state.slots]);
   const pendingTransfersUsed = useMemo(() => {
     if (!savedSnapshot) return 0;
     return SLOT_KEYS.reduce((count, key) => {
@@ -811,6 +826,14 @@ export function useSquad() {
     }
   }, [savedSnapshot]);
 
+  const discardChanges = useCallback(async () => {
+    if (savedSnapshot) {
+      setState(savedSnapshot);
+      return;
+    }
+    await loadSquad();
+  }, [loadSquad, savedSnapshot]);
+
   return {
     state,
     setState,
@@ -825,8 +848,10 @@ export function useSquad() {
     setCaptain,
     chooseCaptain,
     resetUnsavedChanges,
+    discardChanges,
     totalCost,
     remainingBudget,
+    isDirty,
     players,
     playersLoading,
     playersError,

@@ -87,6 +87,7 @@ export default function Profile() {
   const [editNicknameVisible, setEditNicknameVisible] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [deleteAttempted, setDeleteAttempted] = useState(false);
   const [nicknameSavedAt, setNicknameSavedAt] = useState<number | null>(null);
   const [legalDocKey, setLegalDocKey] = useState<keyof typeof LEGAL_DOCS | null>(null);
   const [legalLoading, setLegalLoading] = useState(false);
@@ -205,18 +206,23 @@ export default function Profile() {
     if (deletingData) return;
     setDeleteConfirmVisible(false);
     setDeleteConfirmInput('');
+    setDeleteAttempted(false);
   }, [deletingData]);
 
   const handleDeleteAccount = () => {
     setDeleteConfirmInput('');
+    setDeleteAttempted(false);
     setDeleteConfirmVisible(true);
   };
 
   const handleDeleteAccountFromModal = async () => {
+    setDeleteAttempted(true);
+    if (deleteConfirmInput !== DELETE_CONFIRM_TEXT) return;
     const success = await handleDeleteAccountConfirmed();
     if (!success) return;
     setDeleteConfirmVisible(false);
     setDeleteConfirmInput('');
+    setDeleteAttempted(false);
   };
 
   useEffect(() => {
@@ -666,36 +672,59 @@ export default function Profile() {
         >
           <View style={styles.modalBackdrop}>
             <Pressable style={StyleSheet.absoluteFill} onPress={closeDeleteConfirmModal} disabled={deletingData} />
-            <View style={styles.sheet}>
+            <View style={[styles.sheet, styles.deleteSheet]}>
               <View style={styles.sheetHandle} />
-              <Text style={styles.sheetTitle}>Delete account</Text>
-              <Text style={styles.sheetSubtitle}>
+              <Text style={[styles.sheetTitle, styles.deleteSheetTitle]}>Delete Account</Text>
+              <Text style={[styles.sheetSubtitle, styles.deleteSheetSubtitle]}>
                 This will permanently delete your account and data. This action cannot be undone.
               </Text>
-              <TextInput
-                style={styles.sheetInput}
-                placeholder="Type DELETE to confirm"
-                placeholderTextColor={COLORS.muted2}
-                value={deleteConfirmInput}
-                onChangeText={setDeleteConfirmInput}
-                editable={!deletingData}
-                autoCapitalize="characters"
-                autoCorrect={false}
-              />
-              <View style={styles.sheetActions}>
+              <View
+                style={[
+                  styles.deleteInputWrap,
+                  deleteConfirmInput === DELETE_CONFIRM_TEXT && styles.deleteInputWrapValid,
+                ]}
+              >
+                <TextInput
+                  style={styles.deleteInput}
+                  placeholder="Type DELETE to confirm"
+                  placeholderTextColor={COLORS.muted2}
+                  value={deleteConfirmInput}
+                  onChangeText={value => {
+                    setDeleteConfirmInput(value);
+                    if (value === DELETE_CONFIRM_TEXT) {
+                      setDeleteAttempted(false);
+                    }
+                  }}
+                  editable={!deletingData}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={() => {
+                    setDeleteAttempted(true);
+                  }}
+                />
+                {deleteConfirmInput === DELETE_CONFIRM_TEXT ? (
+                  <Ionicons name="checkmark-circle" size={18} color="rgba(52, 211, 153, 0.95)" />
+                ) : null}
+              </View>
+              {deleteAttempted && deleteConfirmInput !== DELETE_CONFIRM_TEXT ? (
+                <Text style={styles.deleteHelperText}>Type DELETE exactly to enable account deletion.</Text>
+              ) : null}
+              <View style={styles.deleteActions}>
                 <Pressable
-                  style={({ pressed }) => [styles.sheetBtn, styles.cancelBtn, pressed && styles.pressed]}
+                  style={({ pressed }) => [styles.deleteCloseBtn, pressed && styles.pressed]}
                   onPress={closeDeleteConfirmModal}
                   disabled={deletingData}
                 >
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                  <Text style={styles.deleteCloseBtnText}>Close</Text>
                 </Pressable>
                 <Pressable
+                  accessibilityState={{ disabled: deleteConfirmInput !== DELETE_CONFIRM_TEXT || deletingData }}
                   style={({ pressed }) => [
                     styles.sheetBtn,
                     styles.deleteBtn,
-                    (deleteConfirmInput !== DELETE_CONFIRM_TEXT || deletingData) && styles.sheetBtnDisabled,
-                    (pressed || deletingData) && styles.pressed,
+                    (deleteConfirmInput !== DELETE_CONFIRM_TEXT || deletingData) && styles.deleteBtnDisabled,
+                    pressed && deleteConfirmInput === DELETE_CONFIRM_TEXT && !deletingData && styles.pressed,
                   ]}
                   onPress={() => {
                     void handleDeleteAccountFromModal();
@@ -1232,16 +1261,85 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
+  deleteSheet: {
+    paddingTop: 12,
+    paddingBottom: 28,
+    gap: 10,
+    marginBottom: 14,
+  },
+  deleteSheetTitle: {
+    fontSize: 22,
+    letterSpacing: 0.2,
+  },
+  deleteSheetSubtitle: {
+    fontSize: 15,
+    marginTop: 2,
+    marginBottom: 8,
+    lineHeight: 22,
+  },
+  deleteInputWrap: {
+    minHeight: 50,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  deleteInputWrapValid: {
+    borderColor: 'rgba(52, 211, 153, 0.85)',
+    backgroundColor: 'rgba(52, 211, 153, 0.08)',
+  },
+  deleteInput: {
+    flex: 1,
+    color: COLORS.text,
+    fontSize: 16,
+    paddingVertical: 12,
+  },
+  deleteHelperText: {
+    marginTop: -2,
+    color: 'rgba(252, 165, 165, 0.95)',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  deleteActions: {
+    marginTop: 10,
+    marginBottom: 14,
+    gap: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deleteCloseBtn: {
+    width: 84,
+    minHeight: 50,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteCloseBtnText: {
+    color: COLORS.muted,
+    fontSize: 15,
+    fontWeight: '600',
+  },
   deleteBtn: {
-    backgroundColor: 'rgba(239,68,68,0.92)',
+    backgroundColor: 'rgba(220, 38, 38, 0.95)',
+    minHeight: 50,
+    flex: 1,
   },
   deleteBtnText: {
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
   },
-  sheetBtnDisabled: {
-    opacity: 0.45,
+  deleteBtnDisabled: {
+    backgroundColor: 'rgba(120, 40, 40, 0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   pressed: {
     opacity: 0.8,
