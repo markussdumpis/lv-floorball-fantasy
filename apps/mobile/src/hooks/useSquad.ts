@@ -20,6 +20,7 @@ export type SquadState = {
     name: string | null;
     position: string | null;
     team: string | null;
+    purchase_price?: number | null;
     price_final: number | null;
     price: number | null;
     points_total?: number | null;
@@ -261,12 +262,20 @@ export function useSquad() {
           select: 'id,transfers_left,created_at,last_transfer_grant_at',
           user_id: `eq.${userId}`,
           order: 'created_at.desc',
-          limit: 1,
+          limit: 5,
         },
         timeoutMs: 12_000,
         }
       );
-      const teamRow = Array.isArray(teamRows) ? teamRows[0] : null;
+      const teamCandidates = Array.isArray(teamRows) ? teamRows : [];
+      if (__DEV__ && teamCandidates.length > 1) {
+        console.log('[squad-debug] multiple fantasy teams detected', {
+          userId,
+          count: teamCandidates.length,
+          teamIds: teamCandidates.map(t => t.id),
+        });
+      }
+      const teamRow = (teamId ? teamCandidates.find(t => t.id === teamId) : null) ?? teamCandidates[0] ?? null;
       if (!teamRow?.id) {
         const empty: SquadSnapshot = {
           slots: SLOT_KEYS.map(slot_key => ({ slot_key, player_id: null })),
@@ -286,7 +295,8 @@ export function useSquad() {
         return;
       }
 
-      setTeamId(teamRow.id);
+      const currentTeamId = teamRow.id;
+      setTeamId(currentTeamId);
       const baseTransfers = teamRow.transfers_left ?? DEFAULT_TRANSFERS;
       const { transfersLeft: reconciledTransfers, lastGrantAt } = reconcileTransfers(
         baseTransfers,
@@ -315,13 +325,26 @@ export function useSquad() {
           requireAuth: true,
           query: {
             select:
-              'player_id,is_captain,joined_at,left_at,players(id,name,position,team,price,price_final,points_total,points)',
-            fantasy_team_id: `eq.${teamRow.id}`,
+              'player_id,is_captain,joined_at,left_at,purchase_price,players(id,name,position,team,price,price_final,points_total,points)',
+            fantasy_team_id: `eq.${currentTeamId}`,
             left_at: 'is.null',
           },
           timeoutMs: 12_000,
         }
       );
+      if (__DEV__) {
+        const ids = (playerRows ?? []).map(row => row.player_id).filter(Boolean);
+        const lockedCost = (playerRows ?? []).reduce((sum, row) => {
+          const price = typeof row.purchase_price === 'number' && !Number.isNaN(row.purchase_price) ? row.purchase_price : 0;
+          return sum + price;
+        }, 0);
+        console.log('[squad-debug] loadSquad roster', {
+          teamId: currentTeamId,
+          playerCount: ids.length,
+          playerIds: ids,
+          lockedCost,
+        });
+      }
 
       const mapped = (playerRows ?? []).map(row => ({
         id: row.player_id as string | null,
@@ -330,6 +353,7 @@ export function useSquad() {
         detail: row.players
           ? {
               ...row.players,
+              purchase_price: typeof row.purchase_price === 'number' ? row.purchase_price : null,
               joined_at: row.joined_at ?? null,
               left_at: row.left_at ?? null,
             }
@@ -353,7 +377,7 @@ export function useSquad() {
       const captainRow = mapped.find(p => p.isCaptain);
       const detailMap: SquadState['playerDetails'] = {};
       mapped.forEach(p => {
-        if (p.id) detailMap[p.id] = p.detail ?? detailMap[p.id] ?? { id: p.id, name: null, position: null, team: null, price: null, price_final: null };
+        if (p.id) detailMap[p.id] = p.detail ?? detailMap[p.id] ?? { id: p.id, name: null, position: null, team: null, purchase_price: null, price: null, price_final: null };
       });
       // captain cooldown
       let captainNextChangeAt: string | null = null;
@@ -364,7 +388,7 @@ export function useSquad() {
             requireAuth: true,
             query: {
               select: 'starts_at,ends_at',
-              fantasy_team_id: `eq.${teamRow.id}`,
+              fantasy_team_id: `eq.${currentTeamId}`,
               ends_at: 'is.null',
               order: 'starts_at.desc',
               limit: 1,
@@ -407,7 +431,7 @@ export function useSquad() {
             requireAuth: true,
             query: {
               select: 'total_points',
-              fantasy_team_id: `eq.${teamRow.id}`,
+              fantasy_team_id: `eq.${currentTeamId}`,
               limit: 1,
             },
             timeoutMs: 12_000,
@@ -438,7 +462,7 @@ export function useSquad() {
     } finally {
       setLoading(false);
     }
-  }, [loadFromCache, persistCache, state.transfersLeft]);
+  }, [loadFromCache, persistCache, reconcileTransfers, teamId]);
 
   const updateSlot = useCallback((slot_key: SquadSlotKey, player_id: string | null) => {
     setState(prev => {
@@ -491,6 +515,15 @@ export function useSquad() {
           }
         );
         let roster = rosterRows ?? [];
+        const resolveCurrentPrice = (id: string): number => {
+          const live = playerMap.get(id);
+          if (typeof live?.price_final === 'number' && !Number.isNaN(live.price_final)) return live.price_final;
+          if (typeof live?.price === 'number' && !Number.isNaN(live.price)) return live.price;
+          const detail = stateRef.current.playerDetails[id];
+          if (typeof detail?.price_final === 'number' && !Number.isNaN(detail.price_final)) return detail.price_final;
+          if (typeof detail?.price === 'number' && !Number.isNaN(detail.price)) return detail.price;
+          return 0;
+        };
 
         const selectedIds = stateRef.current.slots.map(s => s.player_id).filter(Boolean) as string[];
         if (!selectedIds.length) {
@@ -502,6 +535,7 @@ export function useSquad() {
           const payload = selectedIds.map(id => ({
             fantasy_team_id: team,
             player_id: id,
+            purchase_price: resolveCurrentPrice(id),
             is_captain: false,
             joined_at: new Date().toISOString(),
             left_at: null,
@@ -536,6 +570,7 @@ export function useSquad() {
               body: [{
                 fantasy_team_id: team,
                 player_id: playerId,
+                purchase_price: resolveCurrentPrice(playerId),
                 is_captain: false,
                 joined_at: new Date().toISOString(),
                 left_at: null,
@@ -585,7 +620,7 @@ export function useSquad() {
         return { ok: false, error: friendly };
       }
     },
-    [fetchLatestTeamId, loadSquad, setCaptain, teamId]
+    [fetchLatestTeamId, loadSquad, playerMap, setCaptain, teamId]
   );
 
   const saveSquad = useCallback(async () => {
@@ -632,6 +667,15 @@ export function useSquad() {
       diagLog('squad_save_start', { team });
 
       const newIds = state.slots.map(s => s.player_id).filter(Boolean) as string[];
+      const resolveCurrentPrice = (playerId: string): number => {
+        const live = playerMap.get(playerId);
+        if (typeof live?.price_final === 'number' && !Number.isNaN(live.price_final)) return live.price_final;
+        if (typeof live?.price === 'number' && !Number.isNaN(live.price)) return live.price;
+        const detail = state.playerDetails[playerId];
+        if (typeof detail?.price_final === 'number' && !Number.isNaN(detail.price_final)) return detail.price_final;
+        if (typeof detail?.price === 'number' && !Number.isNaN(detail.price)) return detail.price;
+        return 0;
+      };
       const desiredCaptainId: string | null =
         state.captainId && newIds.includes(state.captainId) ? state.captainId : null;
 
@@ -710,6 +754,7 @@ export function useSquad() {
         const rosterPayload = toInsert.map(id => ({
           fantasy_team_id: team,
           player_id: id,
+          purchase_price: resolveCurrentPrice(id),
           is_captain: false,
           joined_at: new Date().toISOString(),
           left_at: null,
@@ -784,13 +829,16 @@ export function useSquad() {
     } finally {
       setSaving(false);
     }
-  }, [getOrCreateFantasyTeam, loadSquad, persistCache, savedSnapshot, state]);
+  }, [getOrCreateFantasyTeam, loadSquad, persistCache, playerMap, savedSnapshot, state]);
 
   const totalCost = useMemo(() => {
     const priceFor = (playerId: string | null) => {
       if (!playerId) return 0;
       const detail = state.playerDetails[playerId];
-      const player = detail ?? playerMap.get(playerId);
+      if (typeof detail?.purchase_price === 'number' && !Number.isNaN(detail.purchase_price)) {
+        return detail.purchase_price;
+      }
+      const player = playerMap.get(playerId) ?? detail;
       const price =
         typeof player?.price_final === 'number' && !Number.isNaN(player.price_final)
           ? player.price_final

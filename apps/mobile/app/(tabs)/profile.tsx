@@ -68,6 +68,32 @@ type DeleteAccountResponse = {
   success?: boolean;
 };
 
+function isTimeoutLikeError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return (
+    message === 'DELETE_ACCOUNT_TIMEOUT' ||
+    message === 'TIMEOUT' ||
+    message.includes('AbortError') ||
+    message.includes('aborted')
+  );
+}
+
+async function withHardTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  timeoutCode: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(timeoutCode)), timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeoutPromise]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
 export default function Profile() {
   const { user, loading, signOut } = useAuth();
   const router = useRouter();
@@ -92,6 +118,7 @@ export default function Profile() {
   const [legalDocKey, setLegalDocKey] = useState<keyof typeof LEGAL_DOCS | null>(null);
   const [legalLoading, setLegalLoading] = useState(false);
   const [legalError, setLegalError] = useState<string | null>(null);
+  const [forcingLogout, setForcingLogout] = useState(false);
   const scrollRef = useRef<ScrollView | null>(null);
   const legalVisibleRef = useRef(false);
   const legalErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -152,29 +179,44 @@ export default function Profile() {
     setDeletingData(true);
     try {
       const supabase = getSupabaseClient();
-      const timeoutMs = 15_000;
-      let timeoutId: ReturnType<typeof setTimeout> | null = null;
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('DELETE_ACCOUNT_TIMEOUT')), timeoutMs);
-      });
+      const timeoutMs = 20_000;
 
-      let invokeResult: Awaited<ReturnType<typeof supabase.functions.invoke<DeleteAccountResponse>>>;
-      try {
-        invokeResult = await Promise.race([
-          supabase.functions.invoke<DeleteAccountResponse>('delete-account', { body: {} }),
-          timeoutPromise,
-        ]);
-      } finally {
-        if (timeoutId) {
-          clearTimeout(timeoutId);
+      let data: DeleteAccountResponse | null = null;
+      let lastDeleteError: unknown = null;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          const response = await withHardTimeout(
+            fetchJson<DeleteAccountResponse>('/functions/v1/delete-account', {
+              requireAuth: true,
+              method: 'POST',
+              body: {},
+              timeoutMs,
+              label: 'delete-account',
+            }),
+            timeoutMs + 2_000,
+            'DELETE_ACCOUNT_TIMEOUT',
+          );
+          data = response.data ?? null;
+          lastDeleteError = null;
+          break;
+        } catch (err) {
+          lastDeleteError = err;
+          if (attempt >= 2 || !isTimeoutLikeError(err)) {
+            break;
+          }
         }
       }
 
-      const { data, error } = invokeResult;
-      if (error) {
-        Alert.alert('Delete account failed', error.message ?? 'Unable to delete account right now.');
+      if (lastDeleteError) {
+        if (isTimeoutLikeError(lastDeleteError)) {
+          Alert.alert('Delete timed out', 'Please try again in a moment.');
+        } else {
+          const message = lastDeleteError instanceof Error ? lastDeleteError.message : String(lastDeleteError);
+          Alert.alert('Delete account failed', message || 'Unable to delete account right now.');
+        }
         return false;
       }
+
       if (!data?.success) {
         Alert.alert('Delete account failed', 'Unexpected server response. Please try again.');
         return false;
@@ -186,12 +228,12 @@ export default function Profile() {
         await supabase.auth.signOut();
       }
       resetProfileState();
-      await signOut();
+      await withHardTimeout(signOut(), 8_000, 'SIGNOUT_TIMEOUT');
       router.replace('/(auth)/login');
       Alert.alert('Account deleted', 'Your account and personal data were deleted.');
       return true;
     } catch (e: any) {
-      if (e?.message === 'DELETE_ACCOUNT_TIMEOUT') {
+      if (isTimeoutLikeError(e)) {
         Alert.alert('Delete timed out', 'Please try again in a moment.');
       } else {
         Alert.alert('Delete account failed', e?.message ?? 'Unable to delete account right now.');
@@ -201,6 +243,19 @@ export default function Profile() {
       setDeletingData(false);
     }
   };
+
+  const forceLogoutToLogin = useCallback(async () => {
+    if (forcingLogout) return;
+    setForcingLogout(true);
+    try {
+      await signOut();
+    } catch {
+      // best-effort logout
+    } finally {
+      router.replace('/(auth)/login');
+      setForcingLogout(false);
+    }
+  }, [forcingLogout, router, signOut]);
 
   const closeDeleteConfirmModal = useCallback(() => {
     if (deletingData) return;
@@ -242,7 +297,7 @@ export default function Profile() {
         });
         const row = Array.isArray(data) ? data[0] : null;
         if (!row) {
-          router.replace('/(auth)/login');
+          await forceLogoutToLogin();
           return;
         }
         if (row?.nickname) {
@@ -253,13 +308,13 @@ export default function Profile() {
         const message = e?.message ?? '';
         const status = e?.status;
         if (status === 401 || /401/.test(String(message))) {
-          router.replace('/(auth)/login');
+          await forceLogoutToLogin();
           return;
         }
       }
     };
     loadProfileNickname();
-  }, [user?.id, router]);
+  }, [forceLogoutToLogin, user?.id]);
 
   useEffect(() => {
     const loadPerformanceStats = async () => {
@@ -296,10 +351,43 @@ export default function Profile() {
         const points = userRow ? toFiniteNumber(userRow.total_points) : 0;
         const currentRank = userIndex >= 0 ? userIndex + 1 : null;
 
+        const [gameweeksRes, profileRes] = await Promise.all([
+          fetchJson<{ gameweeks_played: number | null }[]>(
+            '/rest/v1/user_gameweeks_played_view',
+            {
+              requireAuth: true,
+              query: {
+                select: 'gameweeks_played',
+                user_id: `eq.${user.id}`,
+                limit: 1,
+              },
+              timeoutMs: 12000,
+            },
+          ),
+          fetchJson<{ best_rank: number | null }[]>(
+            '/rest/v1/profiles',
+            {
+              requireAuth: true,
+              query: {
+                select: 'best_rank',
+                id: `eq.${user.id}`,
+                limit: 1,
+              },
+              timeoutMs: 12000,
+            },
+          ),
+        ]);
+        const gameweeksRow = Array.isArray(gameweeksRes.data) ? gameweeksRes.data[0] : null;
+        const profileRow = Array.isArray(profileRes.data) ? profileRes.data[0] : null;
+        const playedWeeksRaw = Number(gameweeksRow?.gameweeks_played ?? 0);
+        const playedWeeks = Number.isFinite(playedWeeksRaw) ? Math.max(0, Math.trunc(playedWeeksRaw)) : 0;
+        const bestRankRaw = Number(profileRow?.best_rank ?? NaN);
+        const persistedBestRank = Number.isFinite(bestRankRaw) ? Math.max(1, Math.trunc(bestRankRaw)) : null;
+
         setSeasonPoints(points);
         setRank(currentRank);
-        setBestRank(currentRank);
-        setGameweeksPlayed(userRow && points > 0 ? 1 : 0);
+        setBestRank(persistedBestRank ?? currentRank);
+        setGameweeksPlayed(playedWeeks);
       } catch {
         setSeasonPoints(null);
         setRank(null);

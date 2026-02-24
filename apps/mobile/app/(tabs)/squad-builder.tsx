@@ -76,9 +76,11 @@ export default function SquadBuilder({ showClose = true }: Props) {
   const {
     state,
     savedSnapshot,
+    teamId,
     loadSquad,
     updateSlot,
     saveSquad,
+    totalCost,
     remainingBudget,
     players,
     playersLoading,
@@ -308,7 +310,9 @@ export default function SquadBuilder({ showClose = true }: Props) {
         ? (state.playerDetails[filled.player_id] as unknown as Player) ?? players.find(p => p.id === filled.player_id) ?? null
         : null;
     const playerPrice =
-      typeof player?.price_final === 'number' && !Number.isNaN(player.price_final)
+      typeof (player as any)?.purchase_price === 'number' && !Number.isNaN((player as any).purchase_price)
+        ? (player as any).purchase_price
+        : typeof player?.price_final === 'number' && !Number.isNaN(player.price_final)
         ? player.price_final
         : typeof player?.price === 'number' && !Number.isNaN(player.price)
         ? player.price
@@ -518,6 +522,18 @@ export default function SquadBuilder({ showClose = true }: Props) {
   const captainOptions = useMemo(() => {
     return selectedPlayers as Player[];
   }, [selectedPlayers]);
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    const ids = state.slots.map(s => s.player_id).filter(Boolean);
+    console.log('[squad-debug] screen snapshot', {
+      teamId,
+      selectedCount: ids.length,
+      selectedIds: ids,
+      totalCost,
+      remainingBudget,
+    });
+  }, [remainingBudget, state.slots, teamId, totalCost]);
 
   const captainDaysLeft = useMemo(() => {
     if (!state.captainNextChangeAt) return 0;

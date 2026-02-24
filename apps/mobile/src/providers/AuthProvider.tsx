@@ -46,6 +46,18 @@ export function useAuth() {
 
 type Props = { children: ReactNode };
 
+function isInvalidSessionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('jwt') ||
+    normalized.includes('unauthorized') ||
+    normalized.includes('invalid') ||
+    normalized.includes('user from sub claim in jwt does not exist') ||
+    normalized.includes('user not found')
+  );
+}
+
 export function AuthProvider({ children }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -165,7 +177,23 @@ export function AuthProvider({ children }: Props) {
           setConfigError(error.message);
           diagLog('auth_session_fail', { message: error.message });
         }
-        const initialSession = data.session ?? null;
+        let initialSession = data.session ?? null;
+        if (initialSession?.access_token) {
+          try {
+            const { data: currentUser, error: currentUserError } = await supabase.auth.getUser(initialSession.access_token);
+            if (currentUserError || !currentUser?.user) {
+              if (isInvalidSessionError(currentUserError)) {
+                await forceLocalSignOut();
+                initialSession = null;
+              }
+            }
+          } catch (sessionErr) {
+            if (isInvalidSessionError(sessionErr)) {
+              await forceLocalSignOut();
+              initialSession = null;
+            }
+          }
+        }
         setSession(initialSession);
         setUser(initialSession?.user ?? null);
         if (initialSession?.user) {
