@@ -261,10 +261,13 @@ export function AuthProvider({ children }: Props) {
     if (!uid) throw new Error('No signed-in user to set nickname.');
     const safe = nickname.trim();
     if (!safe) throw new Error('Nickname cannot be empty.');
+    await ensureProfile(uid, supabase);
+    const { error: rpcErr } = await supabase.rpc('update_nickname', { new_nickname: safe });
+    if (rpcErr) throw rpcErr;
     const { data: upData, error: upErr } = await supabase
       .from('profiles')
-      .upsert({ id: uid, nickname: safe }, { onConflict: 'id' })
       .select('nickname')
+      .eq('id', uid)
       .single();
     if (upErr) throw upErr;
     diagLog('nickname_set', { userId: uid });
@@ -277,10 +280,12 @@ export function AuthProvider({ children }: Props) {
     if (!safe) throw new Error('Nickname cannot be empty.');
     // ensure profile row exists before updating nickname
     await ensureProfile(userId, supabase);
+    const { error: rpcErr } = await supabase.rpc('update_nickname', { new_nickname: safe });
+    if (rpcErr) throw rpcErr;
     const { data, error: upErr } = await supabase
       .from('profiles')
-      .upsert({ id: userId, nickname: safe }, { onConflict: 'id' })
       .select('nickname')
+      .eq('id', userId)
       .single();
     if (upErr) throw upErr;
     diagLog('nickname_set', { userId });

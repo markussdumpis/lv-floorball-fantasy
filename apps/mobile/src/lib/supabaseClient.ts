@@ -68,9 +68,10 @@ export function getSupabaseClient(): SupabaseClient {
   const createdClient = createClient(url, anon, {
     auth: {
       storage: AsyncStorage,
+      flowType: 'pkce',
       autoRefreshToken: true,
       persistSession: true,
-      detectSessionInUrl: false,
+      detectSessionInUrl: true,
     },
     global: {
       fetch: fetchWithTimeout,

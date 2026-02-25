@@ -27,6 +27,7 @@ import { COLORS } from '../../src/theme/colors';
 const SEASON = '2025-26';
 const SUPPORT_EMAIL = 'lvfloorballfantasy@gmail.com';
 const DELETE_CONFIRM_TEXT = 'DELETE';
+const NICKNAME_COOLDOWN_DAYS = 30;
 const LEGAL_DOCS = {
   privacy: {
     title: 'Privacy Policy',
@@ -115,6 +116,7 @@ export default function Profile() {
   const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
   const [deleteAttempted, setDeleteAttempted] = useState(false);
   const [nicknameSavedAt, setNicknameSavedAt] = useState<number | null>(null);
+  const [nicknameUpdatedAt, setNicknameUpdatedAt] = useState<string | null>(null);
   const [legalDocKey, setLegalDocKey] = useState<keyof typeof LEGAL_DOCS | null>(null);
   const [legalLoading, setLegalLoading] = useState(false);
   const [legalError, setLegalError] = useState<string | null>(null);
@@ -131,6 +133,26 @@ export default function Profile() {
     const nick = email.split('@')[0];
     return nick || email || 'Guest';
   }, [user?.email, nickname]);
+
+  useEffect(() => {
+    if (!__DEV__) return;
+    console.log('[PROFILE_STATE]', {
+      userId: user?.id ?? null,
+      email: user?.email ?? null,
+      nickname: nickname ?? null,
+      displayName,
+    });
+  }, [displayName, nickname, user?.email, user?.id]);
+
+  const nicknameCooldownDaysRemaining = useMemo(() => {
+    if (!nicknameUpdatedAt) return 0;
+    const lastChangedAt = Date.parse(nicknameUpdatedAt);
+    if (!Number.isFinite(lastChangedAt)) return 0;
+    const cooldownEndsAt = lastChangedAt + NICKNAME_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
+    const remainingMs = cooldownEndsAt - Date.now();
+    if (remainingMs <= 0) return 0;
+    return Math.ceil(remainingMs / (24 * 60 * 60 * 1000));
+  }, [nicknameUpdatedAt]);
 
   const initials = useMemo(() => {
     const name = displayName.trim();
@@ -286,35 +308,70 @@ export default function Profile() {
     }
   }, [loading, user, router]);
 
-  useEffect(() => {
-    const loadProfileNickname = async () => {
-      if (!user?.id) return;
+  const loadProfileNickname = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      let row: { nickname: string | null; nickname_updated_at?: string | null } | null = null;
       try {
-        const { data } = await fetchJson<{ nickname: string | null }[]>('/rest/v1/profiles', {
-          requireAuth: true,
-          query: { id: `eq.${user.id}`, select: 'nickname', limit: 1 },
-          timeoutMs: 8000,
-        });
-        const row = Array.isArray(data) ? data[0] : null;
-        if (!row) {
-          await forceLogoutToLogin();
-          return;
-        }
-        if (row?.nickname) {
-          setNickname(row.nickname);
-          setNicknameInput(row.nickname);
-        }
+        const response = await fetchJson<{ nickname: string | null; nickname_updated_at: string | null }[]>(
+          '/rest/v1/profiles',
+          {
+            requireAuth: true,
+            query: { id: `eq.${user.id}`, select: 'nickname,nickname_updated_at', limit: 1 },
+            timeoutMs: 8000,
+            label: 'profile-nickname',
+          },
+        );
+        row = Array.isArray(response.data) ? response.data[0] ?? null : null;
       } catch (e: any) {
-        const message = e?.message ?? '';
-        const status = e?.status;
-        if (status === 401 || /401/.test(String(message))) {
-          await forceLogoutToLogin();
-          return;
+        const message = String(e?.message ?? '');
+        // Backward compatibility while DB migration is not yet applied.
+        if (message.includes('nickname_updated_at does not exist')) {
+          const fallback = await fetchJson<{ nickname: string | null }[]>('/rest/v1/profiles', {
+            requireAuth: true,
+            query: { id: `eq.${user.id}`, select: 'nickname', limit: 1 },
+            timeoutMs: 8000,
+            label: 'profile-nickname-fallback',
+          });
+          const fallbackRow = Array.isArray(fallback.data) ? fallback.data[0] ?? null : null;
+          row = fallbackRow ? { nickname: fallbackRow.nickname, nickname_updated_at: null } : null;
+        } else {
+          throw e;
         }
       }
-    };
-    loadProfileNickname();
+      if (!row) {
+        if (__DEV__) {
+          console.log('[PROFILE] nickname row missing', { userId: user.id });
+        }
+        await forceLogoutToLogin();
+        return;
+      }
+      if (__DEV__) {
+        console.log('[PROFILE] nickname loaded', { userId: user.id, nickname: row.nickname ?? null });
+      }
+      setNicknameUpdatedAt(row.nickname_updated_at ?? null);
+      setNickname(row?.nickname ?? null);
+      setNicknameInput(row?.nickname ?? '');
+    } catch (e: any) {
+      const message = e?.message ?? '';
+      const status = e?.status;
+      if (__DEV__) {
+        console.log('[PROFILE] nickname load failed', {
+          userId: user.id,
+          status: status ?? null,
+          message: String(message),
+        });
+      }
+      if (status === 401 || /401/.test(String(message))) {
+        await forceLogoutToLogin();
+        return;
+      }
+    }
   }, [forceLogoutToLogin, user?.id]);
+
+  useEffect(() => {
+    void loadProfileNickname();
+  }, [loadProfileNickname]);
 
   useEffect(() => {
     const loadPerformanceStats = async () => {
@@ -409,7 +466,8 @@ export default function Profile() {
   useFocusEffect(
     useCallback(() => {
       scrollRef.current?.scrollTo({ y: 0, animated: false });
-    }, []),
+      void loadProfileNickname();
+    }, [loadProfileNickname]),
   );
 
   const appVersion = useMemo(() => {
@@ -538,23 +596,44 @@ export default function Profile() {
       setError('Nickname cannot be empty.');
       return;
     }
+    if (trimmed.length < 3 || trimmed.length > 20) {
+      setError('Nickname must be 3-20 characters.');
+      return;
+    }
+    if (nicknameCooldownDaysRemaining > 0) {
+      setError(`You can change your nickname again in ${nicknameCooldownDaysRemaining} days.`);
+      return;
+    }
 
     setError(null);
     setNicknameSaving(true);
     try {
-      await fetchJson('/rest/v1/profiles', {
+      await fetchJson('/rest/v1/rpc/update_nickname', {
         requireAuth: true,
-        method: 'PATCH',
-        query: { id: `eq.${user?.id}` },
-        body: { nickname: trimmed },
+        method: 'POST',
+        body: { new_nickname: trimmed },
         timeoutMs: 8000,
       });
       setNickname(trimmed);
       setNicknameInput(trimmed);
+      setNicknameUpdatedAt(new Date().toISOString());
       setNicknameSavedAt(Date.now());
       setEditNicknameVisible(false);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to save nickname.');
+      const message = String(e?.message ?? '');
+      if (message.includes('NICKNAME_COOLDOWN')) {
+        const cooldownMatch = message.match(/NICKNAME_COOLDOWN:(\d+)/);
+        const remainingDays = cooldownMatch ? Number(cooldownMatch[1]) : nicknameCooldownDaysRemaining;
+        const safeDays = Number.isFinite(remainingDays) && remainingDays > 0 ? remainingDays : 1;
+        setError(`You can change your nickname again in ${safeDays} days.`);
+      } else if (
+        message.includes('update_nickname') ||
+        message.includes('nickname_updated_at does not exist')
+      ) {
+        setError('Database update pending. Please run the latest Supabase migration.');
+      } else {
+        setError(e?.message ?? 'Failed to save nickname.');
+      }
     } finally {
       setNicknameSaving(false);
     }
@@ -589,6 +668,10 @@ export default function Profile() {
             email={user?.email ?? '—'}
             seasonLabel="Season 2025/2026"
             onEditPress={() => {
+              if (nicknameCooldownDaysRemaining > 0) {
+                setError(`You can change your nickname again in ${nicknameCooldownDaysRemaining} days.`);
+                return;
+              }
               setError(null);
               setEditNicknameVisible(true);
             }}
@@ -644,8 +727,16 @@ export default function Profile() {
               <SettingsRow
                 icon="create-outline"
                 title="Nickname"
-                value={nicknameSavedAt ? 'Saved' : displayName}
+                value={
+                  nicknameCooldownDaysRemaining > 0
+                    ? `Available in ${nicknameCooldownDaysRemaining} days`
+                    : nicknameSavedAt
+                    ? 'Saved'
+                    : displayName
+                }
+                disabled={nicknameCooldownDaysRemaining > 0}
                 onPress={() => {
+                  if (nicknameCooldownDaysRemaining > 0) return;
                   setError(null);
                   setEditNicknameVisible(true);
                 }}
@@ -653,8 +744,9 @@ export default function Profile() {
               <SettingsRow
                 icon="person-circle-outline"
                 title="Manage account"
-                value={user?.email ?? '—'}
-                onPress={() => {}}
+                onPress={() => {
+                  router.push('/account-security');
+                }}
               />
               <SettingsRow
                 icon="shield-checkmark-outline"
@@ -722,7 +814,7 @@ export default function Profile() {
                 editable={!nicknameSaving}
                 autoCapitalize="none"
                 autoCorrect={false}
-                maxLength={24}
+                maxLength={20}
               />
               <View style={styles.sheetActions}>
                 <Pressable
