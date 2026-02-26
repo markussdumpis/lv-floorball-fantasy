@@ -75,7 +75,7 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
         await signInWithEmail(sanitizedEmail, trimmedPassword);
         router.replace('/(tabs)');
       } else {
-        const session = await signUpWithEmail(sanitizedEmail, trimmedPassword);
+        const session = await signUpWithEmail(sanitizedEmail, trimmedPassword, trimmedNickname);
         if (session?.user?.id) {
           if (nicknameNeeded) {
             try {

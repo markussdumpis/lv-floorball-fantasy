@@ -20,9 +20,11 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { WebView } from 'react-native-webview';
 import { AppBackground } from '../../src/components/AppBackground';
 import { getSupabaseClient } from '../../src/lib/supabaseClient';
-import { fetchJson } from '../../src/lib/supabaseRest';
+import { fetchJson, getAccessTokenFromStorage } from '../../src/lib/supabaseRest';
 import { useAuth } from '../../src/providers/AuthProvider';
 import { COLORS } from '../../src/theme/colors';
+import { OnboardingModal } from '../../src/components/onboarding/OnboardingModal';
+import { useOnboarding } from '../../src/hooks/useOnboarding';
 
 const SEASON = '2025-26';
 const SUPPORT_EMAIL = 'lvfloorballfantasy@gmail.com';
@@ -62,7 +64,6 @@ type ProfileHeaderProps = {
   displayName: string;
   email: string;
   seasonLabel: string;
-  onEditPress: () => void;
 };
 
 type DeleteAccountResponse = {
@@ -121,6 +122,12 @@ export default function Profile() {
   const [legalLoading, setLegalLoading] = useState(false);
   const [legalError, setLegalError] = useState<string | null>(null);
   const [forcingLogout, setForcingLogout] = useState(false);
+  const {
+    visible: onboardingVisible,
+    openManual: openOnboardingManual,
+    finishOnboarding,
+    submitting: onboardingSubmitting,
+  } = useOnboarding({ autoShow: false });
   const scrollRef = useRef<ScrollView | null>(null);
   const legalVisibleRef = useRef(false);
   const legalErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -201,62 +208,68 @@ export default function Profile() {
     setDeletingData(true);
     try {
       const supabase = getSupabaseClient();
-      const timeoutMs = 20_000;
+      let accessToken: string | null = null;
+      try {
+        accessToken = await withHardTimeout(
+          getAccessTokenFromStorage(),
+          3_000,
+          'DELETE_ACCOUNT_STORAGE_TOKEN_TIMEOUT',
+        );
+      } catch {
+        accessToken = null;
+      }
+      if (!accessToken) {
+        const { data: sessionData } = await withHardTimeout(
+          supabase.auth.getSession(),
+          10_000,
+          'DELETE_ACCOUNT_SESSION_TIMEOUT',
+        );
+        accessToken = sessionData?.session?.access_token ?? null;
+      }
+      if (!accessToken) {
+        Alert.alert('Delete account failed', 'Your session expired. Please sign in again.');
+        return false;
+      }
 
-      let data: DeleteAccountResponse | null = null;
-      let lastDeleteError: unknown = null;
-      for (let attempt = 1; attempt <= 2; attempt += 1) {
+      // Delete in background using captured token; do not block UI logout.
+      const deleteInBackground = async () => {
         try {
           const response = await withHardTimeout(
             fetchJson<DeleteAccountResponse>('/functions/v1/delete-account', {
-              requireAuth: true,
+              requireAuth: false,
               method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}` },
               body: {},
-              timeoutMs,
+              timeoutMs: 20_000,
               label: 'delete-account',
             }),
-            timeoutMs + 2_000,
+            22_000,
             'DELETE_ACCOUNT_TIMEOUT',
           );
-          data = response.data ?? null;
-          lastDeleteError = null;
-          break;
-        } catch (err) {
-          lastDeleteError = err;
-          if (attempt >= 2 || !isTimeoutLikeError(err)) {
-            break;
+          if (!response?.data?.success && __DEV__) {
+            console.log('[delete-account] unexpected response', response?.data ?? null);
+          }
+        } catch (err: any) {
+          // best effort: user is already logged out locally
+          if (__DEV__) {
+            console.log('[delete-account] background delete failed', err?.message ?? String(err));
           }
         }
-      }
+      };
+      void deleteInBackground();
 
-      if (lastDeleteError) {
-        if (isTimeoutLikeError(lastDeleteError)) {
-          Alert.alert('Delete timed out', 'Please try again in a moment.');
-        } else {
-          const message = lastDeleteError instanceof Error ? lastDeleteError.message : String(lastDeleteError);
-          Alert.alert('Delete account failed', message || 'Unable to delete account right now.');
-        }
-        return false;
-      }
-
-      if (!data?.success) {
-        Alert.alert('Delete account failed', 'Unexpected server response. Please try again.');
-        return false;
-      }
-
-      try {
-        await supabase.auth.signOut({ scope: 'global' } as any);
-      } catch {
-        await supabase.auth.signOut();
-      }
       resetProfileState();
-      await withHardTimeout(signOut(), 8_000, 'SIGNOUT_TIMEOUT');
+      // Logout immediately without waiting on remote calls.
+      try {
+        await withHardTimeout(signOut(), 2_500, 'SIGNOUT_TIMEOUT');
+      } catch {
+        // continue to login route regardless
+      }
       router.replace('/(auth)/login');
-      Alert.alert('Account deleted', 'Your account and personal data were deleted.');
       return true;
     } catch (e: any) {
       if (isTimeoutLikeError(e)) {
-        Alert.alert('Delete timed out', 'Please try again in a moment.');
+        Alert.alert('Delete account failed', 'Session check timed out. Please try again.');
       } else {
         Alert.alert('Delete account failed', e?.message ?? 'Unable to delete account right now.');
       }
@@ -667,14 +680,6 @@ export default function Profile() {
             displayName={displayName}
             email={user?.email ?? '—'}
             seasonLabel="Season 2025/2026"
-            onEditPress={() => {
-              if (nicknameCooldownDaysRemaining > 0) {
-                setError(`You can change your nickname again in ${nicknameCooldownDaysRemaining} days.`);
-                return;
-              }
-              setError(null);
-              setEditNicknameVisible(true);
-            }}
           />
 
           <View style={styles.sectionBlock}>
@@ -726,7 +731,7 @@ export default function Profile() {
             <View style={styles.settingsCard}>
               <SettingsRow
                 icon="create-outline"
-                title="Nickname"
+                title="Change Nickname"
                 value={
                   nicknameCooldownDaysRemaining > 0
                     ? `Available in ${nicknameCooldownDaysRemaining} days`
@@ -747,6 +752,11 @@ export default function Profile() {
                 onPress={() => {
                   router.push('/account-security');
                 }}
+              />
+              <SettingsRow
+                icon="information-circle-outline"
+                title="How it works"
+                onPress={openOnboardingManual}
               />
               <SettingsRow
                 icon="shield-checkmark-outline"
@@ -922,6 +932,12 @@ export default function Profile() {
           </View>
         </Modal>
 
+        <OnboardingModal
+          visible={onboardingVisible}
+          onFinish={finishOnboarding}
+          submitting={onboardingSubmitting}
+        />
+
         <Modal
           animationType="fade"
           visible={Boolean(activeLegalDoc)}
@@ -1051,7 +1067,7 @@ function buildSupportMailto({
 // tap Delete account -> modal opens -> typing wrong text keeps button disabled ->
 // typing DELETE enables button -> Cancel closes modal and clears input.
 
-function ProfileHeader({ initials, displayName, email, seasonLabel, onEditPress }: ProfileHeaderProps) {
+function ProfileHeader({ initials, displayName, email, seasonLabel }: ProfileHeaderProps) {
   return (
     <View style={styles.profileHeader}>
       <View style={styles.avatar}>
@@ -1059,15 +1075,9 @@ function ProfileHeader({ initials, displayName, email, seasonLabel, onEditPress 
       </View>
 
       <View style={styles.headerMain}>
-        <View style={styles.nameRow}>
-          <Text numberOfLines={1} style={styles.displayName}>
-            {displayName}
-          </Text>
-          <Pressable style={({ pressed }) => [styles.editBtn, pressed && styles.pressed]} onPress={onEditPress}>
-            <Ionicons name="pencil-outline" size={14} color={COLORS.muted} />
-            <Text style={styles.editBtnText}>Edit</Text>
-          </Pressable>
-        </View>
+        <Text numberOfLines={1} style={styles.displayName}>
+          {displayName}
+        </Text>
         <Text numberOfLines={1} style={styles.emailText}>
           {email}
         </Text>
@@ -1192,32 +1202,10 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   displayName: {
-    flex: 1,
     color: COLORS.text,
     fontSize: 23,
     fontWeight: '800',
-  },
-  editBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-  },
-  editBtnText: {
-    color: COLORS.muted,
-    fontSize: 12,
-    fontWeight: '600',
   },
   emailText: {
     marginTop: 2,

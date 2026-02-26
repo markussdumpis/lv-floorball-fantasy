@@ -19,7 +19,6 @@ export const SCORING_RULES = [
   {
     title: 'Goalies',
     rows: [
-      { label: 'Goal', value: '+2' },
       { label: 'Assist', value: '+2' },
       { label: 'Save', value: '+0.1' },
       { label: 'Goals against: 0', value: '+8 (clean sheet in this band)' },

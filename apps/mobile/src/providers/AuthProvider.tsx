@@ -27,7 +27,7 @@ type AuthContextValue = {
   loading: boolean;
   configError: string | null;
   signInWithEmail: (email: string, password: string) => Promise<Session | null>;
-  signUpWithEmail: (email: string, password: string) => Promise<Session | null>;
+  signUpWithEmail: (email: string, password: string, nickname?: string) => Promise<Session | null>;
   signInWithGoogle: () => Promise<Session | null>;
   setNickname: (nickname: string) => Promise<string>;
   setNicknameForUser: (userId: string, nickname: string) => Promise<string>;
@@ -66,6 +66,13 @@ export function AuthProvider({ children }: Props) {
   const lastProfileEnsuredFor = useRef<string | null>(null);
   const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
   const generateNickname = () => `User_${Math.floor(Math.random() * 900000 + 100000)}`;
+  const normalizePreferredNickname = (value: unknown): string | null => {
+    const raw = typeof value === 'string' ? value.trim() : '';
+    if (!raw) return null;
+    if (raw.length < 3 || raw.length > 20) return null;
+    if (!/^[A-Za-z0-9_]+$/.test(raw)) return null;
+    return raw;
+  };
 
   useEffect(() => {
     const registerForPushNotifications = async () => {
@@ -132,7 +139,28 @@ export function AuthProvider({ children }: Props) {
     lastProfileEnsuredFor.current = userId;
   };
 
-  const ensureNicknamePresent = async (userId: string, client?: SupabaseClient) => {
+  const persistNicknameForUser = async (userId: string, nickname: string, client?: SupabaseClient) => {
+    const supabaseClient = client ?? supabase;
+    if (!supabaseClient || !userId) return;
+    const safe = nickname.trim();
+    if (!safe) return;
+    const { error: rpcErr } = await supabaseClient.rpc('update_nickname', { new_nickname: safe });
+    if (!rpcErr) return;
+    const fallbackAllowed =
+      rpcErr.code === '42883' ||
+      String(rpcErr.message ?? '').toLowerCase().includes('update_nickname');
+    if (!fallbackAllowed) throw rpcErr;
+    const { error: upsertErr } = await supabaseClient
+      .from('profiles')
+      .upsert({ id: userId, nickname: safe }, { onConflict: 'id' });
+    if (upsertErr) throw upsertErr;
+  };
+
+  const ensureNicknamePresent = async (
+    userId: string,
+    client?: SupabaseClient,
+    preferredNickname?: string | null,
+  ) => {
     const supabaseClient = client ?? supabase;
     if (!supabaseClient || !userId) return;
     try {
@@ -150,14 +178,13 @@ export function AuthProvider({ children }: Props) {
       console.warn('Nickname read failed', readErr);
     }
 
-    const fallback = generateNickname();
-    const { error: upErr } = await supabaseClient
-      .from('profiles')
-      .upsert({ id: userId, nickname: fallback }, { onConflict: 'id' });
-    if (upErr) {
-      console.warn('Failed to set fallback nickname', upErr);
-    } else {
+    const preferred = normalizePreferredNickname(preferredNickname);
+    const fallback = preferred ?? generateNickname();
+    try {
+      await persistNicknameForUser(userId, fallback, supabaseClient);
       diagLog('nickname_backfill', { userId });
+    } catch (upErr) {
+      console.warn('Failed to set fallback nickname', upErr);
     }
   };
 
@@ -198,7 +225,8 @@ export function AuthProvider({ children }: Props) {
         setUser(initialSession?.user ?? null);
         if (initialSession?.user) {
           await ensureProfile(initialSession.user.id, supabase);
-          await ensureNicknamePresent(initialSession.user.id, supabase);
+          const preferredFromMeta = normalizePreferredNickname(initialSession.user.user_metadata?.nickname);
+          await ensureNicknamePresent(initialSession.user.id, supabase, preferredFromMeta);
           const createdAt = initialSession.user.created_at ?? null;
           if (createdAt) {
             await AsyncStorage.setItem('userCreatedAt', createdAt);
@@ -218,7 +246,8 @@ export function AuthProvider({ children }: Props) {
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
         await ensureProfile(newSession.user.id, supabase);
-        await ensureNicknamePresent(newSession.user.id, supabase);
+        const preferredFromMeta = normalizePreferredNickname(newSession.user.user_metadata?.nickname);
+        await ensureNicknamePresent(newSession.user.id, supabase, preferredFromMeta);
         const createdAt = newSession.user.created_at ?? null;
         if (createdAt) {
           await AsyncStorage.setItem('userCreatedAt', createdAt);
@@ -243,12 +272,25 @@ export function AuthProvider({ children }: Props) {
     return data.session ?? null;
   };
 
-  const signUpWithEmail = async (email: string, password: string) => {
+  const signUpWithEmail = async (email: string, password: string, nickname?: string) => {
     if (!supabase) throw new Error(configError ?? 'Supabase not configured.');
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const preferred = normalizePreferredNickname(nickname);
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: preferred ? { data: { nickname: preferred } } : undefined,
+    });
     if (error) throw error;
-    if (data.session?.user) {
-      await ensureProfile(data.session.user.id, supabase);
+    const userId = data.session?.user?.id ?? data.user?.id ?? null;
+    if (userId) {
+      await ensureProfile(userId, supabase);
+      if (preferred) {
+        try {
+          await persistNicknameForUser(userId, preferred, supabase);
+        } catch (e) {
+          console.warn('Failed to persist signup nickname immediately', e);
+        }
+      }
     }
     return data.session ?? null;
   };
@@ -262,8 +304,24 @@ export function AuthProvider({ children }: Props) {
     const safe = nickname.trim();
     if (!safe) throw new Error('Nickname cannot be empty.');
     await ensureProfile(uid, supabase);
-    const { error: rpcErr } = await supabase.rpc('update_nickname', { new_nickname: safe });
-    if (rpcErr) throw rpcErr;
+    const persistNickname = async () => {
+      const { error: rpcErr } = await supabase.rpc('update_nickname', { new_nickname: safe });
+      if (!rpcErr) return;
+
+      // Backward compatibility: environments without RPC/cooldown migration yet.
+      const fallbackAllowed =
+        rpcErr.code === '42883' ||
+        String(rpcErr.message ?? '').toLowerCase().includes('update_nickname');
+      if (!fallbackAllowed) {
+        throw rpcErr;
+      }
+
+      const { error: upsertErr } = await supabase
+        .from('profiles')
+        .upsert({ id: uid, nickname: safe }, { onConflict: 'id' });
+      if (upsertErr) throw upsertErr;
+    };
+    await persistNickname();
     const { data: upData, error: upErr } = await supabase
       .from('profiles')
       .select('nickname')
@@ -278,10 +336,26 @@ export function AuthProvider({ children }: Props) {
     if (!supabase) throw new Error(configError ?? 'Supabase not configured.');
     const safe = nickname.trim();
     if (!safe) throw new Error('Nickname cannot be empty.');
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    if (sessionErr) throw sessionErr;
+    const currentUid = sessionData.session?.user?.id ?? session?.user?.id ?? null;
+    if (currentUid && currentUid !== userId) {
+      throw new Error('Nickname update user mismatch.');
+    }
     // ensure profile row exists before updating nickname
     await ensureProfile(userId, supabase);
     const { error: rpcErr } = await supabase.rpc('update_nickname', { new_nickname: safe });
-    if (rpcErr) throw rpcErr;
+    if (rpcErr) {
+      const fallbackAllowed =
+        rpcErr.code === '42883' ||
+        String(rpcErr.message ?? '').toLowerCase().includes('update_nickname');
+      if (!fallbackAllowed) throw rpcErr;
+
+      const { error: upsertErr } = await supabase
+        .from('profiles')
+        .upsert({ id: userId, nickname: safe }, { onConflict: 'id' });
+      if (upsertErr) throw upsertErr;
+    }
     const { data, error: upErr } = await supabase
       .from('profiles')
       .select('nickname')

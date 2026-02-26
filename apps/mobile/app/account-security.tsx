@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Clipboard, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
+import { Ionicons } from '@expo/vector-icons';
 import { AppBackground } from '../src/components/AppBackground';
 import { COLORS } from '../src/theme/colors';
 import { getSupabaseClient } from '../src/lib/supabaseClient';
@@ -54,6 +55,12 @@ function buildPasswordResetRedirectUrl() {
   return generated;
 }
 
+function truncateUserId(value: string | null) {
+  if (!value) return '—';
+  if (value.length <= 16) return value;
+  return `${value.slice(0, 8)}…${value.slice(-5)}`;
+}
+
 async function withHardTimeout<T>(operation: Promise<T>, timeoutMs: number, code: string): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<never>((_, reject) => {
@@ -82,6 +89,7 @@ export default function AccountSecurityScreen() {
   const providerLabel = useMemo(() => {
     return toProviderLabel(state.provider);
   }, [state.provider]);
+  const shortUserId = useMemo(() => truncateUserId(state.userId), [state.userId]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -168,6 +176,12 @@ export default function AccountSecurityScreen() {
     }
   };
 
+  const handleCopy = (value: string | null) => {
+    if (!value) return;
+    Clipboard.setString(value);
+    Alert.alert('Copied');
+  };
+
   if (authLoading) {
     return (
       <AppBackground variant="home">
@@ -188,58 +202,94 @@ export default function AccountSecurityScreen() {
     <AppBackground variant="home">
       <SafeAreaView style={styles.safeArea}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <Text style={styles.title}>Account Security</Text>
-
-          <View style={styles.card}>
-            <Field label="Email" value={state.email ?? '—'} />
-            <Field label="Auth provider" value={providerLabel} />
-            <Field label="User ID" value={state.userId ?? '—'} mono />
-          </View>
-
-          {!state.isOAuth ? (
-            <Pressable
-              style={({ pressed }) => [
-                styles.primaryButton,
-                (pressed || sendingReset) && styles.pressed,
-                sendingReset && styles.disabled,
-              ]}
-              onPress={() => {
-                void handleSendReset();
-              }}
-              disabled={sendingReset || !state.email}
-            >
-              {sendingReset ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={styles.primaryButtonText}>Send password reset email</Text>
-              )}
-            </Pressable>
-          ) : (
-            <View style={styles.oauthCallout}>
-              <Text style={styles.oauthCalloutText}>
-                {state.isGoogle
-                  ? "You’re signed in with Google. Password changes are managed in your Google account."
-                  : `You’re signed in with ${providerLabel}. Password changes are managed in your ${providerLabel} account.`}
-              </Text>
+          <View style={styles.container}>
+            <View style={styles.headerRow}>
+              <Pressable
+                style={({ pressed }) => [styles.headerBack, pressed && styles.pressed]}
+                onPress={() => router.back()}
+              >
+                <Ionicons name="chevron-back" size={18} color={COLORS.text} />
+                <Text style={styles.headerBackText}>Back</Text>
+              </Pressable>
+              <Text style={styles.headerTitle}>Account Security</Text>
+              <View style={styles.headerSpacer} />
             </View>
-          )}
 
-          <Pressable
-            style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.secondaryButtonText}>Back</Text>
-          </Pressable>
+            <View style={styles.card}>
+              <Field
+                label="Email"
+                value={state.email ?? '—'}
+              />
+              <Field label="Auth provider" value={providerLabel} />
+              <Field
+                label="Support ID"
+                value={shortUserId}
+                mono
+                onCopy={state.userId ? () => handleCopy(state.userId) : undefined}
+              />
+            </View>
+
+            {!state.isOAuth ? (
+              <View style={styles.actionSection}>
+                <Text style={styles.helperText}>
+                  We’ll email you a reset link.
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    (pressed || sendingReset) && styles.pressed,
+                    (sendingReset || !state.email) && styles.disabled,
+                  ]}
+                  onPress={() => {
+                    void handleSendReset();
+                  }}
+                  disabled={sendingReset || !state.email}
+                >
+                  {sendingReset ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.primaryButtonText}>Send password reset email</Text>
+                  )}
+                </Pressable>
+              </View>
+            ) : (
+              <View style={styles.oauthCallout}>
+                <Text style={styles.oauthCalloutText}>
+                  {state.isGoogle
+                    ? "You’re signed in with Google. Password changes are managed in your Google account."
+                    : `You’re signed in with ${providerLabel}. Password changes are managed in your ${providerLabel} account.`}
+                </Text>
+              </View>
+            )}
+          </View>
         </ScrollView>
       </SafeAreaView>
     </AppBackground>
   );
 }
 
-function Field({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+function Field({
+  label,
+  value,
+  mono = false,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  onCopy?: (() => void) | undefined;
+}) {
   return (
     <View style={styles.fieldRow}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.fieldHeader}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        {onCopy ? (
+          <Pressable style={({ pressed }) => [styles.copyBtn, pressed && styles.pressed]} onPress={onCopy}>
+            <Ionicons name="copy-outline" size={14} color={COLORS.muted} />
+            <Text style={styles.copyBtnText}>Copy</Text>
+          </Pressable>
+        ) : null}
+      </View>
       <Text style={[styles.fieldValue, mono && styles.mono]}>{value}</Text>
     </View>
   );
@@ -256,15 +306,40 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 16,
-    paddingTop: 14,
+    paddingTop: 12,
     paddingBottom: 28,
+    alignItems: 'center',
+  },
+  container: {
+    width: '100%',
+    maxWidth: 560,
     gap: 14,
   },
-  title: {
+  headerRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerBack: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 6,
+    paddingRight: 8,
+  },
+  headerBackText: {
+    color: COLORS.muted,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  headerTitle: {
     color: COLORS.text,
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: '800',
-    letterSpacing: 0.2,
+  },
+  headerSpacer: {
+    width: 54,
   },
   card: {
     backgroundColor: 'rgba(6, 13, 35, 0.88)',
@@ -276,6 +351,11 @@ const styles = StyleSheet.create({
   },
   fieldRow: {
     gap: 4,
+  },
+  fieldHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   fieldLabel: {
     color: COLORS.muted2,
@@ -291,8 +371,31 @@ const styles = StyleSheet.create({
     fontFamily: 'Menlo',
     fontSize: 13,
   },
+  copyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  copyBtnText: {
+    color: COLORS.muted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  actionSection: {
+    gap: 9,
+  },
+  helperText: {
+    color: COLORS.muted,
+    fontSize: 13,
+    lineHeight: 18,
+  },
   primaryButton: {
-    marginTop: 8,
     height: 52,
     borderRadius: 14,
     backgroundColor: COLORS.accent,
@@ -304,22 +407,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
-  secondaryButton: {
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    color: COLORS.text,
-    fontSize: 15,
-    fontWeight: '600',
-  },
   oauthCallout: {
-    marginTop: 8,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: COLORS.border,

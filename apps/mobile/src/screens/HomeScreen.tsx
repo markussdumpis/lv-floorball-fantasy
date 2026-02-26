@@ -22,6 +22,8 @@ import { SCORING_RULES } from '../config/scoring';
 import { GAME_RULES } from '../constants/rules';
 import { AppBackground } from '../components/AppBackground';
 import { useLeaderboard } from '../hooks/useLeaderboard';
+import { OnboardingModal } from '../components/onboarding/OnboardingModal';
+import { useOnboarding } from '../hooks/useOnboarding';
 
 const S = { xs: 8, sm: 12, md: 16, lg: 24, xl: 32 };
 const LOGO_URL =
@@ -70,6 +72,8 @@ export default function HomeScreen() {
   const [showRules, setShowRules] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(false);
   const [showLeaderboardModal, setShowLeaderboardModal] = useState(false);
+  const { visible: onboardingVisible, finishOnboarding, submitting: onboardingSubmitting } =
+    useOnboarding({ autoShow: true });
   const rootScrollRef = useRef<ScrollView | null>(null);
   const watermarkAnim = useRef(new Animated.Value(0)).current;
   const contentHeightRef = useRef(0);
@@ -299,9 +303,10 @@ export default function HomeScreen() {
               <View style={styles.rulesSection}>
                 <Text style={styles.rulesSectionTitle}>Rules</Text>
                 {GAME_RULES.map(row => (
-                  <View key={`rules-${row.label}`} style={styles.rulesRow}>
-                    <Text style={styles.rulesRowLabel}>{row.label}</Text>
-                    <Text style={styles.rulesRowValue}>{row.value}</Text>
+                  <View key={`rules-${row.label}`} style={styles.ruleLine}>
+                    <Text style={styles.ruleLineText}>
+                      <Text style={styles.ruleLineLead}>{row.label}:</Text> {row.value}
+                    </Text>
                   </View>
                 ))}
               </View>
@@ -383,6 +388,11 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+      <OnboardingModal
+        visible={onboardingVisible}
+        onFinish={finishOnboarding}
+        submitting={onboardingSubmitting}
+      />
     </AppBackground>
   );
 }
@@ -697,6 +707,19 @@ const styles = StyleSheet.create({
   rulesSectionTitle: {
     color: COLORS.text,
     fontSize: 14,
+    fontWeight: '700',
+  },
+  ruleLine: {
+    paddingVertical: 1,
+  },
+  ruleLineText: {
+    color: COLORS.muted,
+    fontSize: 12.5,
+    lineHeight: 17,
+    textAlign: 'left',
+  },
+  ruleLineLead: {
+    color: COLORS.text,
     fontWeight: '700',
   },
   rulesRow: {
