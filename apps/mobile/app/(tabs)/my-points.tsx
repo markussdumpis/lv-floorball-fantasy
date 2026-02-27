@@ -11,6 +11,7 @@ import {
 import { router } from 'expo-router';
 import { fetchJson, getStoredSession } from '../../src/lib/supabaseRest';
 import { AppBackground } from '../../src/components/AppBackground';
+import { useTranslation } from 'react-i18next';
 
 type PlayerPointsRow = {
   playerId: string;
@@ -25,6 +26,7 @@ type PlayerPointsRow = {
 const LOG_PREFIX = '[MyPoints]';
 
 export default function MyPointsScreen() {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export default function MyPointsScreen() {
       console.log(`${LOG_PREFIX} start`);
       const { token, userId } = await getStoredSession();
       if (!token || !userId) {
-        setError('Please log in');
+        setError(t('errors.pleaseLogIn'));
         setRows([]);
         return;
       }
@@ -66,11 +68,11 @@ export default function MyPointsScreen() {
       );
       const team = Array.isArray(teamRows) ? teamRows[0] : null;
       if (!team?.id) {
-        setError('No fantasy team found');
+        setError(t('errors.noFantasyTeamFound'));
         setRows([]);
         return;
       }
-      setTeamName(team.name ?? 'My Team');
+      setTeamName(team.name ?? t('home.myTeam'));
       console.log(`${LOG_PREFIX} team ${team.id}`);
 
       // Step 3: points view (REST)
@@ -89,7 +91,7 @@ export default function MyPointsScreen() {
       const rowsMapped: PlayerPointsRow[] = (pointsRows ?? [])
         .map(row => ({
           playerId: (row as any).player_id,
-          name: (row as any).name ?? 'Unknown player',
+          name: (row as any).name ?? t('common.unknownPlayer'),
           position: (row as any).position ?? null,
           isCaptain: Boolean((row as any).is_captain),
           basePoints: Number((row as any).base_points ?? 0) || 0,
@@ -101,13 +103,13 @@ export default function MyPointsScreen() {
       setRows(rowsMapped);
     } catch (err: any) {
       console.error(`${LOG_PREFIX} Unexpected error`, err);
-      setError(err?.message ?? 'Unexpected error loading points.');
+      setError(err?.message ?? t('errors.unexpectedErrorLoadingPoints'));
       setRows([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     loadPoints();
@@ -145,9 +147,9 @@ export default function MyPointsScreen() {
         </View>
         <Text style={styles.pointsText}>{item.totalPoints.toFixed(2)}</Text>
       </View>
-      <Text style={styles.subText}>Position: {item.position ?? 'Unknown'}</Text>
+      <Text style={styles.subText}>{t('myPoints.position')}: {item.position ?? t('common.unknown')}</Text>
       {item.isCaptain ? (
-        <Text style={styles.captainBonus}>Captain bonus: {item.captainBonus.toFixed(2)}</Text>
+        <Text style={styles.captainBonus}>{t('myPoints.captainBonus')}: {item.captainBonus.toFixed(2)}</Text>
       ) : null}
     </TouchableOpacity>
   );
@@ -158,13 +160,13 @@ export default function MyPointsScreen() {
         {loading ? (
           <View style={styles.loadingBox}>
             <ActivityIndicator size="large" color="#3B82F6" />
-            <Text style={styles.statusText}>Loading your points…</Text>
+            <Text style={styles.statusText}>{t('myPoints.loading')}</Text>
           </View>
         ) : (
           <>
-            <Text style={styles.title}>{teamName ?? 'My Points'}</Text>
-            <Text style={styles.totalText}>Season Total: {totalPoints.toFixed(2)}</Text>
-            <Text style={styles.subheader}>Season: 2025-26</Text>
+            <Text style={styles.title}>{teamName ?? t('nav.myPoints')}</Text>
+            <Text style={styles.totalText}>{t('myPoints.seasonTotal', { total: totalPoints.toFixed(2) })}</Text>
+            <Text style={styles.subheader}>{t('myPoints.seasonLabel', { season: '2025-26' })}</Text>
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
             <FlatList
               data={rows}
@@ -172,7 +174,7 @@ export default function MyPointsScreen() {
               renderItem={renderItem}
               contentContainerStyle={styles.listContent}
               ListEmptyComponent={
-                <Text style={styles.statusText}>No players to show. Save a squad to see points.</Text>
+                <Text style={styles.statusText}>{t('myPoints.empty')}</Text>
               }
               refreshControl={
                 <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#3B82F6" />

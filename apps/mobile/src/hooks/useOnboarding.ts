@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../providers/AuthProvider';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { ONBOARDING_ALWAYS_SHOW } from '../constants/onboarding';
 
 const autoShownForSession = new Set<string>();
-const ONBOARDING_CACHE_KEY = 'onboarding_completed';
+const ONBOARDING_CACHE_KEY = 'onboarding_main_completed';
 
 type UseOnboardingOptions = {
   autoShow?: boolean;
@@ -51,12 +52,12 @@ export function useOnboarding(options: UseOnboardingOptions = {}) {
       await supabase.from('profiles').upsert({ id: user.id }, { onConflict: 'id' });
       const { data, error } = await supabase
         .from('profiles')
-        .select('onboarding_completed')
+        .select('onboarding_main_completed,onboarding_completed')
         .eq('id', user.id)
         .maybeSingle();
       if (error) throw error;
       if (!mountedRef.current) return;
-      const isCompleted = Boolean(data?.onboarding_completed);
+      const isCompleted = Boolean(data?.onboarding_main_completed ?? data?.onboarding_completed);
       setCompleted(isCompleted);
       await AsyncStorage.setItem(
         ONBOARDING_CACHE_KEY,
@@ -79,7 +80,8 @@ export function useOnboarding(options: UseOnboardingOptions = {}) {
 
   useEffect(() => {
     if (!autoShow || authLoading || checking || !user?.id) return;
-    if (completed) return;
+    const forceShow = __DEV__ && ONBOARDING_ALWAYS_SHOW;
+    if (!forceShow && completed) return;
     if (autoShownForSession.has(user.id)) return;
     autoShownForSession.add(user.id);
     setVisible(true);
@@ -91,6 +93,7 @@ export function useOnboarding(options: UseOnboardingOptions = {}) {
     const { error } = await supabase
       .from('profiles')
       .update({
+        onboarding_main_completed: true,
         onboarding_completed: true,
         onboarding_completed_at: new Date().toISOString(),
       })

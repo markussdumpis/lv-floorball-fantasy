@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -18,12 +18,13 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useUpcomingMatches } from '../hooks/useUpcomingMatches';
 import { COLORS } from '../theme/colors';
 import dayjs from 'dayjs';
-import { SCORING_RULES } from '../config/scoring';
-import { GAME_RULES } from '../constants/rules';
+import { getScoringRules } from '../config/scoring';
+import { getGameRules } from '../constants/rules';
 import { AppBackground } from '../components/AppBackground';
 import { useLeaderboard } from '../hooks/useLeaderboard';
 import { OnboardingModal } from '../components/onboarding/OnboardingModal';
 import { useOnboarding } from '../hooks/useOnboarding';
+import { useTranslation } from 'react-i18next';
 
 const S = { xs: 8, sm: 12, md: 16, lg: 24, xl: 32 };
 const LOGO_URL =
@@ -54,6 +55,7 @@ const PALETTE = {
 };
 
 export default function HomeScreen() {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { matches, loading: matchesLoading, error: matchesError } = useUpcomingMatches();
   const { width } = useWindowDimensions();
@@ -78,6 +80,13 @@ export default function HomeScreen() {
   const watermarkAnim = useRef(new Animated.Value(0)).current;
   const contentHeightRef = useRef(0);
   const viewHeightRef = useRef(0);
+  const GAME_RULES = useMemo(() => getGameRules(t), [t]);
+  const SCORING_RULES = useMemo(() => getScoringRules(t), [t]);
+  const myTeamLabel = t('home.myTeam');
+  const draftModeLabel = t('home.draftMode');
+  const comingSoonLabel = t('home.comingSoon');
+  const myTeamLabelStyle = useMemo(() => getHeaderCtaTextStyle(myTeamLabel), [myTeamLabel]);
+  const draftModeLabelStyle = useMemo(() => getHeaderCtaTextStyle(draftModeLabel), [draftModeLabel]);
 
   useEffect(() => {
     console.log('[home] mounted');
@@ -150,7 +159,9 @@ export default function HomeScreen() {
                 onPress={() => router.push('/squad')}
                 android_ripple={{ color: 'rgba(255,255,255,0.12)', borderless: false }}
               >
-                <Text style={styles.headerActionPrimaryText}>My Team</Text>
+                <Text numberOfLines={2} style={[styles.headerActionPrimaryText, myTeamLabelStyle]}>
+                  {myTeamLabel}
+                </Text>
               </Pressable>
               <Pressable
                 style={({ pressed }) => [
@@ -162,17 +173,21 @@ export default function HomeScreen() {
                 ]}
                 disabled
               >
-                <Text style={styles.headerActionLockedText}>Draft mode</Text>
-                <Text style={styles.headerActionLockedSub}>Coming soon</Text>
+                <Text numberOfLines={2} style={[styles.headerActionLockedText, draftModeLabelStyle]}>
+                  {draftModeLabel}
+                </Text>
+                <Text numberOfLines={1} style={styles.headerActionLockedSub}>
+                  {comingSoonLabel}
+                </Text>
               </Pressable>
             </View>
           </View>
 
           <View style={[styles.card, styles.matchesCardShell]}>
             <View style={styles.cardHeader}>
-              <Text style={[styles.cardTitle, styles.matchesTitle]}>Upcoming matches</Text>
+              <Text style={[styles.cardTitle, styles.matchesTitle]}>{t('home.upcomingMatches')}</Text>
               <Pressable hitSlop={8} style={({ pressed }) => pressed && { opacity: 0.7 }} onPress={() => router.push('/fixtures')}>
-                <Text style={styles.cardHint}>See all</Text>
+                <Text style={styles.cardHint}>{t('home.seeAll')}</Text>
               </Pressable>
             </View>
 
@@ -203,7 +218,7 @@ export default function HomeScreen() {
               })}
             />
           ) : matches.length === 0 ? (
-            <Text style={styles.emptyText}>No upcoming matches</Text>
+            <Text style={styles.emptyText}>{t('home.noUpcomingMatches')}</Text>
           ) : (
             <FlatList
               data={matches}
@@ -216,7 +231,7 @@ export default function HomeScreen() {
               ]}
               ItemSeparatorComponent={() => <View style={{ width: ITEM_SPACING }} />}
               renderItem={({ item }) => (
-                <MatchTile match={item} cardWidth={CARD_WIDTH} cardHeight={126} />
+                <MatchTile match={item} cardWidth={CARD_WIDTH} cardHeight={126} vsLabel={t('common.vs')} />
               )}
               snapToAlignment="center"
               snapToInterval={SNAP}
@@ -242,16 +257,16 @@ export default function HomeScreen() {
           ]}
           onPress={() => setShowLeaderboardModal(true)}
         >
-          <Text style={styles.cardTitle}>Leaderboard</Text>
+          <Text style={styles.cardTitle}>{t('home.leaderboard')}</Text>
           <View style={styles.list}>
             {leaderboardLoading ? (
-              <Text style={styles.emptyText}>Loading leaderboard…</Text>
+              <Text style={styles.emptyText}>{t('home.loadingLeaderboard')}</Text>
             ) : leaderboardError ? (
               <Text style={styles.errorText} numberOfLines={2} selectable>
                 error={leaderboardError}
               </Text>
             ) : leaderboardRows.length === 0 ? (
-              <Text style={styles.emptyText}>No leaderboard yet — be the first</Text>
+              <Text style={styles.emptyText}>{t('home.noLeaderboard')}</Text>
             ) : (
               leaderboardRows.slice(0, 3).map((row, index) => (
                 <Pressable
@@ -275,7 +290,7 @@ export default function HomeScreen() {
                     {(() => {
                       const points = Number(row.total_points ?? 0);
                       if (__DEV__) console.log('[leaderboard] row', row.user_id, 'total_points typeof', typeof row.total_points, 'points', points);
-                      return `${points.toFixed(0)} pts`;
+                      return t('home.pointsShort', { count: Math.round(points) });
                     })()}
                   </Text>
                 </Pressable>
@@ -295,13 +310,13 @@ export default function HomeScreen() {
           ]}
         >
           <View style={styles.rulesHeader}>
-            <Text style={styles.cardTitle}>Rules & Points</Text>
-            <Text style={styles.cardHint}>{showRules ? 'Hide' : 'Show'}</Text>
+            <Text style={styles.cardTitle}>{t('home.rulesPoints')}</Text>
+            <Text style={styles.cardHint}>{showRules ? t('common.hide') : t('common.show')}</Text>
           </View>
           {showRules ? (
             <View style={styles.rulesBody}>
               <View style={styles.rulesSection}>
-                <Text style={styles.rulesSectionTitle}>Rules</Text>
+                <Text style={styles.rulesSectionTitle}>{t('home.rules')}</Text>
                 {GAME_RULES.map(row => (
                   <View key={`rules-${row.label}`} style={styles.ruleLine}>
                     <Text style={styles.ruleLineText}>
@@ -353,7 +368,7 @@ export default function HomeScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.cardTitle}>Leaderboard</Text>
+              <Text style={styles.cardTitle}>{t('home.leaderboard')}</Text>
               <Pressable
                 onPress={() => {
                   setShowLeaderboardModal(false);
@@ -361,7 +376,7 @@ export default function HomeScreen() {
                 }}
                 hitSlop={10}
               >
-                <Text style={styles.cardHint}>Close</Text>
+                <Text style={styles.cardHint}>{t('common.close')}</Text>
               </Pressable>
             </View>
             <ScrollView>
@@ -378,7 +393,7 @@ export default function HomeScreen() {
                       {(() => {
                         const points = Number(row.total_points ?? 0);
                         if (__DEV__) console.log('[leaderboard-modal] row', row.user_id, 'typeof', typeof row.total_points, 'points', points);
-                        return `${points.toFixed(0)} pts`;
+                        return t('home.pointsShort', { count: Math.round(points) });
                       })()}
                     </Text>
                   </View>
@@ -397,14 +412,27 @@ export default function HomeScreen() {
   );
 }
 
+function getHeaderCtaTextStyle(label: string) {
+  const trimmedLength = label.trim().length;
+  if (trimmedLength > 16) {
+    return { fontSize: 15, lineHeight: 20 };
+  }
+  if (trimmedLength > 12) {
+    return { fontSize: 16, lineHeight: 21 };
+  }
+  return { fontSize: 17, lineHeight: 22 };
+}
+
 function MatchTile({
   match,
   cardWidth,
   cardHeight,
+  vsLabel,
 }: {
   match: ReturnType<typeof useUpcomingMatches>['matches'][number];
   cardWidth: number;
   cardHeight: number;
+  vsLabel: string;
 }) {
   const date = dayjs(match.date);
   const homeCodeRaw = match.home?.code || 'HOME';
@@ -424,7 +452,7 @@ function MatchTile({
         <View style={styles.centerCol}>
           <View style={styles.codesRow}>
             <Text style={styles.teamCode}>{homeCode}</Text>
-            <Text style={styles.matchVs}>vs</Text>
+            <Text style={styles.matchVs}>{vsLabel}</Text>
             <Text style={styles.teamCode}>{awayCode}</Text>
           </View>
           <Text style={styles.matchTime}>{date.format('HH:mm')}</Text>
@@ -498,9 +526,10 @@ const styles = StyleSheet.create({
   },
   headerActionButton: {
     flex: 1,
-    height: 54,
+    minHeight: 54,
     borderRadius: 18,
     paddingHorizontal: 18,
+    paddingVertical: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -533,9 +562,11 @@ const styles = StyleSheet.create({
   },
   headerActionPrimaryText: {
     color: PALETTE.textPrimary,
-    fontSize: 17,
     fontWeight: '800',
     letterSpacing: 0.05,
+    textAlign: 'center',
+    flexShrink: 1,
+    width: '100%',
   },
   headerActionSecondaryText: {
     color: '#ffffff',
@@ -545,16 +576,21 @@ const styles = StyleSheet.create({
   },
   headerActionLockedText: {
     color: PALETTE.textPrimary,
-    fontSize: 17,
     fontWeight: '800',
     letterSpacing: 0.05,
+    textAlign: 'center',
+    flexShrink: 1,
+    width: '100%',
   },
   headerActionLockedSub: {
     color: PALETTE.textSecondary,
     fontSize: 12,
     fontWeight: '600',
+    lineHeight: 16,
     letterSpacing: 0.1,
-    marginTop: 2,
+    marginTop: 3,
+    textAlign: 'center',
+    width: '100%',
   },
   card: {
     backgroundColor: PALETTE.cardSurface,

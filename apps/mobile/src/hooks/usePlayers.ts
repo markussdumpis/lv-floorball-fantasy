@@ -13,6 +13,16 @@ export type PlayerFilters = {
 };
 
 const DEFAULT_PAGE_SIZE = 20;
+const dedupePlayersById = (rows: Player[]): Player[] => {
+  const byId = new Map<string, Player>();
+  for (const row of rows) {
+    if (!row?.id) continue;
+    if (!byId.has(row.id)) {
+      byId.set(row.id, row);
+    }
+  }
+  return Array.from(byId.values());
+};
 
 export function usePlayers(initial: PlayerFilters = {}) {
   const [filters, setFiltersState] = useState<PlayerFilters>({
@@ -101,7 +111,7 @@ export function usePlayers(initial: PlayerFilters = {}) {
           pointsTotal: (row as any).fantasy_total ?? 0,
           ppg: (row as any).fantasy_ppg ?? 0,
         }));
-        setData(prev => (reset ? nextRows : [...prev, ...nextRows]));
+        setData(prev => (reset ? dedupePlayersById(nextRows) : dedupePlayersById([...prev, ...nextRows])));
         const contentRange = headers.get('content-range');
         const total = contentRange?.split('/')?.[1];
         const totalCount = total ? Number(total) : null;
@@ -139,7 +149,7 @@ export function usePlayers(initial: PlayerFilters = {}) {
     try {
       const { url, anon } = getSupabaseEnv();
       const { ok, json } = await fetchWithTimeout<{ team: string | null }[]>(
-        `${url}/rest/v1/players?select=team&team=not.is.null&order=team.asc`,
+        `${url}/rest/v1/public_players?select=team&team=not.is.null&order=team.asc`,
         {
           headers: {
             apikey: anon,

@@ -20,6 +20,7 @@ import { useRouter } from 'expo-router';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
 import { useSquad, SquadSlotKey } from '../../src/hooks/useSquad';
 import { AppBackground } from '../../src/components/AppBackground';
 import { SEASON_BUDGET_CREDITS } from '../../src/constants/fantasyRules';
@@ -31,6 +32,10 @@ import { COLORS } from '../../src/theme/colors';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SquadShirtSlot } from '../../src/components/SquadShirtSlot';
 import { setSquadUnsavedGuard } from '../../src/lib/squadUnsavedGuard';
+import { CoachMarkRect, CoachMarks } from '../../src/components/onboarding/CoachMarks';
+import { useSquadCoachMarks } from '../../src/hooks/useSquadCoachMarks';
+import { useTour } from '../../src/providers/TourProvider';
+import { useTranslation } from 'react-i18next';
 
 type SlotGroup = 'U' | 'A' | 'V' | 'FLEX';
 
@@ -69,9 +74,11 @@ const positionToGroup = (pos?: string | null): 'U' | 'A' | 'V' => {
 };
 
 export default function SquadBuilder({ showClose = true }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const router = useRouter();
+  const { lastRequest, startTour } = useTour();
   const navigation = useNavigation<any>();
   const {
     state,
@@ -115,6 +122,16 @@ export default function SquadBuilder({ showClose = true }: Props) {
   const rootScrollRef = useRef<ScrollView | null>(null);
   const formationAnim = useRef(new Animated.Value(0)).current;
   const leavePromptOpenRef = useRef(false);
+  const fieldCardRef = useRef<View | null>(null);
+  const changePlayersBtnRef = useRef<View | null>(null);
+  const captainBtnRef = useRef<View | null>(null);
+  const slotAnchorRefs = useRef<Partial<Record<SquadSlotKey, View | null>>>({});
+  const {
+    visible: coachMarksVisible,
+    openManual: openCoachMarksManual,
+    finish: finishCoachMarks,
+  } = useSquadCoachMarks({ autoShow: true });
+  const lastHandledTourRequestRef = useRef(0);
 
   useEffect(() => {
     loadSquad();
@@ -162,13 +179,13 @@ export default function SquadBuilder({ showClose = true }: Props) {
         setLockErrorShown(true);
         return;
       }
-      setLockWarning("Couldn't verify locks—try again.");
+      setLockWarning(t('squad.locksWarning'));
       if (!lockErrorShown) {
-        Alert.alert('Notice', "Couldn't verify locks—try again.");
+        Alert.alert(t('common.notice'), t('squad.locksWarning'));
         setLockErrorShown(true);
       }
     }
-  }, [lockErrorShown]);
+  }, [lockErrorShown, t]);
 
   useEffect(() => {
     refreshLocks();
@@ -266,18 +283,18 @@ export default function SquadBuilder({ showClose = true }: Props) {
     (playerId: string) => {
       if (!activeSlot || !isEditing) return;
       if (lockedPlayers.has(playerId)) {
-        Alert.alert('Locked', 'Locked: this player has a match today.');
+        Alert.alert(t('common.locked'), t('squad.lockedToday'));
         return;
       }
       const alreadyUsedSlot = state.slots.find(s => s.player_id === playerId);
       if (alreadyUsedSlot && alreadyUsedSlot.slot_key !== activeSlot) {
-        Alert.alert('Player already selected', 'Choose a different player for this slot.');
+        Alert.alert(t('squad.playerAlreadySelected'), t('squad.chooseDifferentPlayer'));
         return;
       }
       const prevPlayer = state.slots.find(s => s.slot_key === activeSlot)?.player_id;
       const wouldUseTransfer = Boolean(prevPlayer && prevPlayer !== playerId);
       if (wouldUseTransfer && transfersRemainingRaw <= 0) {
-        Alert.alert('No transfers left', 'You have no transfers left to change this player.');
+        Alert.alert(t('squad.noTransfersLeft'), t('squad.noTransfersLeftChange'));
         return;
       }
       updateSlot(activeSlot, playerId);
@@ -327,48 +344,55 @@ export default function SquadBuilder({ showClose = true }: Props) {
         ? 'FLEX'
         : player?.position?.toUpperCase() ?? SLOT_POS[slot];
     return (
-      <SquadShirtSlot
+      <View
         key={slot}
-        size={size}
-        name={player?.name ?? 'Player'}
-        team={clubCode}
-        position={positionLabel}
-        price={priceText}
-        isCaptain={isCaptain}
-        isLocked={isLocked}
-        isEmpty={!player}
-        onPress={(e: GestureResponderEvent) => {
-          e.stopPropagation();
-          if (player && !isEditing) {
-            router.push({
-              pathname: '/player-points/[playerId]',
-              params: {
-                playerId: player.id,
-                name: player.name ?? '',
-                position: player.position ?? '',
-              },
-            });
-            return;
-          }
-          if (!isEditing) return;
-          if (isLocked) {
-            Alert.alert('Locked', 'Locked: this player has a match today.');
-            return;
-          }
-          if (transfersRemainingRaw <= 0 && filled?.player_id) {
-            Alert.alert('No transfers left', 'You have no transfers left to change this player.');
-            return;
-          }
-          const slotIndex = SLOT_ORDER.indexOf(slot);
-          const slotPos = SLOT_POS[slot];
-          const allowedPositions: ('U' | 'A' | 'V')[] = slotPos === 'FLEX' ? ['U', 'A', 'V'] : [slotPos];
-          const hasCompleteSaved = savedSnapshot?.slots.every(s => s.player_id) ?? false;
-          const mode: 'swap' | 'initial' = hasCompleteSaved ? 'swap' : 'initial';
-          setActiveSlot(slot);
-          setPickContext({ slot, slotIndex, allowedPositions, mode });
-          setPickerVisible(true);
+        ref={node => {
+          slotAnchorRefs.current[slot] = node;
         }}
-      />
+        collapsable={false}
+      >
+        <SquadShirtSlot
+          size={size}
+          name={player?.name ?? 'Player'}
+          team={clubCode}
+          position={positionLabel}
+          price={priceText}
+          isCaptain={isCaptain}
+          isLocked={isLocked}
+          isEmpty={!player}
+          onPress={(e: GestureResponderEvent) => {
+            e.stopPropagation();
+            if (player && !isEditing) {
+              router.push({
+                pathname: '/player-points/[playerId]',
+                params: {
+                  playerId: player.id,
+                  name: player.name ?? '',
+                  position: player.position ?? '',
+                },
+              });
+              return;
+            }
+            if (!isEditing) return;
+            if (isLocked) {
+            Alert.alert(t('common.locked'), t('squad.lockedToday'));
+              return;
+            }
+            if (transfersRemainingRaw <= 0 && filled?.player_id) {
+              Alert.alert(t('squad.noTransfersLeft'), t('squad.noTransfersLeftChange'));
+              return;
+            }
+            const slotIndex = SLOT_ORDER.indexOf(slot);
+            const slotPos = SLOT_POS[slot];
+            const allowedPositions: ('U' | 'A' | 'V')[] = slotPos === 'FLEX' ? ['U', 'A', 'V'] : [slotPos];
+            const hasCompleteSaved = savedSnapshot?.slots.every(s => s.player_id) ?? false;
+            const mode: 'swap' | 'initial' = hasCompleteSaved ? 'swap' : 'initial';
+            setActiveSlot(slot);
+            setPickContext({ slot, slotIndex, allowedPositions, mode });
+            setPickerVisible(true);
+          }}
+        />
+      </View>
     );
   };
 
@@ -419,22 +443,22 @@ export default function SquadBuilder({ showClose = true }: Props) {
   const handleSave = useCallback(async () => {
     const result = await saveForExit();
     if (!result?.ok) {
-      Alert.alert('Save failed', result?.error ?? 'Failed to save squad.');
+      Alert.alert(t('errors.saveFailed'), result?.error ?? t('errors.failedToSaveSquad'));
       return;
     }
     if (result.needsCaptain) {
-      Alert.alert('Saved', 'Squad saved. Pick a captain to finalize.');
+      Alert.alert(t('common.saved'), t('squad.savedPickCaptain'));
       return;
     }
     setActiveAction(null);
-    Alert.alert('Saved', 'Squad saved.');
+    Alert.alert(t('common.saved'), t('squad.saved'));
   }, [saveForExit]);
 
   const handleChangePlayers = useCallback(() => {
     setActiveAction('change');
     const availableTransfers = savedSnapshot?.transfersLeft ?? state.transfersLeft;
     if (availableTransfers <= 0) {
-      Alert.alert('No transfers left', 'You cannot replace players without transfers. Captain can still be updated.');
+      Alert.alert(t('squad.noTransfersLeft'), t('squad.noTransfersLeftReplaceCaptainStill'));
     }
     if (!isEditing) {
       resetUnsavedChanges();
@@ -453,16 +477,16 @@ export default function SquadBuilder({ showClose = true }: Props) {
     (onDiscard: () => void, onSave: () => void) => {
       if (leavePromptOpenRef.current) return;
       leavePromptOpenRef.current = true;
-      Alert.alert('Unsaved changes', 'You have unsaved squad changes. Save before leaving?', [
+      Alert.alert(t('common.unsavedChanges'), t('common.unsavedChangesBody'), [
         {
-          text: 'Stay',
+          text: t('common.stay'),
           style: 'cancel',
           onPress: () => {
             leavePromptOpenRef.current = false;
           },
         },
         {
-          text: 'Discard',
+          text: t('common.discard'),
           style: 'destructive',
           onPress: () => {
             leavePromptOpenRef.current = false;
@@ -470,7 +494,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
           },
         },
         {
-          text: 'Save',
+          text: t('common.save'),
           onPress: () => {
             leavePromptOpenRef.current = false;
             onSave();
@@ -479,6 +503,35 @@ export default function SquadBuilder({ showClose = true }: Props) {
       ]);
     },
     [],
+  );
+
+  const runWithUnsavedGuard = useCallback(
+    (action: () => void) => {
+      if (!isDirty) {
+        action();
+        return;
+      }
+
+      promptUnsavedChanges(
+        () => {
+          void (async () => {
+            await discardChanges();
+            action();
+          })();
+        },
+        () => {
+          void (async () => {
+            const result = await saveForExit();
+            if (!result?.ok) {
+              Alert.alert(t('errors.saveFailed'), result?.error ?? t('errors.failedToSaveSquad'));
+              return;
+            }
+            action();
+          })();
+        },
+      );
+    },
+    [discardChanges, isDirty, promptUnsavedChanges, saveForExit],
   );
 
   useEffect(() => {
@@ -507,7 +560,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
           void (async () => {
             const result = await saveForExit();
             if (!result?.ok) {
-              Alert.alert('Save failed', result?.error ?? 'Failed to save squad.');
+              Alert.alert(t('errors.saveFailed'), result?.error ?? t('errors.failedToSaveSquad'));
               return;
             }
             navigation.dispatch(event.data.action);
@@ -543,6 +596,78 @@ export default function SquadBuilder({ showClose = true }: Props) {
   }, [state.captainNextChangeAt]);
   const canChangeCaptain = captainDaysLeft === 0;
 
+  useEffect(() => {
+    if (!lastRequest || lastRequest.id === lastHandledTourRequestRef.current) return;
+    if (lastRequest.tourId !== 'SQUAD_TIPS') return;
+    lastHandledTourRequestRef.current = lastRequest.id;
+    openCoachMarksManual();
+  }, [lastRequest, openCoachMarksManual]);
+
+  const measureNode = useCallback(async (node: View | null): Promise<CoachMarkRect | null> => {
+    if (!node || typeof node.measureInWindow !== 'function') return null;
+    return new Promise(resolve => {
+      requestAnimationFrame(() => {
+        node.measureInWindow((x, y, width, height) => {
+          if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 1 || height <= 1) {
+            resolve(null);
+            return;
+          }
+          resolve({ x, y, width, height });
+        });
+      });
+    });
+  }, []);
+
+  const getFirstSlotAnchor = useCallback(() => {
+    for (const key of SLOT_ORDER) {
+      const node = slotAnchorRefs.current[key];
+      if (node) return node;
+    }
+    return null;
+  }, []);
+
+  const lockedSlotKey = useMemo(() => {
+    const row = state.slots.find(s => s.player_id && lockedPlayers.has(s.player_id));
+    return row?.slot_key ?? null;
+  }, [lockedPlayers, state.slots]);
+
+  const coachSteps = useMemo(
+    () => [
+      {
+        key: 'player-details',
+        title: t('onboarding.squad.step1.title'),
+        body: t('onboarding.squad.step1.body'),
+        measureTarget: () => measureNode(getFirstSlotAnchor()),
+      },
+      {
+        key: 'team-points',
+        title: t('onboarding.squad.step2.title'),
+        body: t('onboarding.squad.step2.body'),
+        measureTarget: () => measureNode(fieldCardRef.current),
+      },
+      {
+        key: 'transfers',
+        title: t('onboarding.squad.step3.title'),
+        body: t('onboarding.squad.step3.body'),
+        measureTarget: () => measureNode(changePlayersBtnRef.current),
+      },
+      {
+        key: 'captain',
+        title: t('onboarding.squad.step4.title'),
+        body: t('onboarding.squad.step4.body'),
+        measureTarget: () => measureNode(captainBtnRef.current),
+      },
+      {
+        key: 'locks',
+        title: t('onboarding.squad.step5.title'),
+        body: t('onboarding.squad.step5.body'),
+        measureTarget: () =>
+          measureNode(lockedSlotKey ? slotAnchorRefs.current[lockedSlotKey] ?? fieldCardRef.current : fieldCardRef.current),
+      },
+    ],
+    [getFirstSlotAnchor, lockedSlotKey, measureNode, t],
+  );
+
   const teamTotalPoints = useMemo(() => {
     return state.teamPoints ?? 0;
   }, [state.teamPoints]);
@@ -566,19 +691,34 @@ export default function SquadBuilder({ showClose = true }: Props) {
         scrollEventThrottle={16}
       >
         <View style={styles.topRow}>
-          <Text style={styles.title}>Choose your team</Text>
-          {showClose && (
-            <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
-              <Text style={styles.link}>Close</Text>
-            </TouchableOpacity>
-          )}
+          <View style={styles.titleRow}>
+            <Text style={styles.title}>{t('squad.chooseTeam')}</Text>
+            <Pressable
+              onPress={() => {
+                startTour('SQUAD_TIPS', { restart: true, source: 'squad_header_help' });
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={({ pressed }) => [styles.helpInlineBtn, pressed && styles.helpInlineBtnPressed]}
+              accessibilityLabel="How it works"
+              accessibilityRole="button"
+            >
+              <Ionicons name="help-circle-outline" size={19} color="rgba(255,255,255,0.62)" />
+            </Pressable>
+          </View>
+          <View style={styles.topActions}>
+            {showClose && (
+              <TouchableOpacity onPress={() => runWithUnsavedGuard(() => router.back())} hitSlop={10}>
+                <Text style={styles.link}>{t('common.close')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {lockWarning ? (
           <View style={styles.banner}>
             <Text style={styles.bannerText}>{lockWarning}</Text>
             <TouchableOpacity onPress={refreshLocks}>
-              <Text style={styles.bannerLink}>Retry</Text>
+              <Text style={styles.bannerLink}>{t('common.retry')}</Text>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -586,7 +726,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator />
-            <Text style={styles.loadingText}>Loading squad…</Text>
+            <Text style={styles.loadingText}>{t('squad.loadingSquad')}</Text>
           </View>
         ) : null}
 
@@ -596,7 +736,11 @@ export default function SquadBuilder({ showClose = true }: Props) {
           </View>
         ) : null}
 
-        <Pressable style={styles.fieldCard} onPress={() => router.push('/my-points')}>
+        <Pressable
+          ref={fieldCardRef}
+          style={styles.fieldCard}
+          onPress={() => runWithUnsavedGuard(() => router.push('/my-points'))}
+        >
           <LinearGradient
             pointerEvents="none"
             colors={['rgba(46,56,78,0.78)', 'rgba(18,24,38,0.8)']}
@@ -606,9 +750,9 @@ export default function SquadBuilder({ showClose = true }: Props) {
           />
           <SquadBackdrop />
           <View style={styles.fieldHeader}>
-            <Text style={styles.fieldTitle}>Squad</Text>
+            <Text style={styles.fieldTitle}>{t('nav.squad')}</Text>
             <View style={styles.pointsWrap}>
-              <Text style={styles.pointsLabel}>Points</Text>
+              <Text style={styles.pointsLabel}>{t('common.points')}</Text>
               <Text style={styles.pointsValue}>{teamTotalPoints ?? 0}</Text>
             </View>
         </View>
@@ -649,53 +793,57 @@ export default function SquadBuilder({ showClose = true }: Props) {
         </Pressable>
 
     <View style={styles.actionRow}>
-      <TouchableOpacity
-        style={[
-          styles.primaryButton,
-          styles.actionButton,
-          activeAction === 'change' && isEditing && styles.actionButtonActive,
-        ]}
-        onPress={handleChangePlayers}
-        activeOpacity={0.88}
-      >
-        <Text style={styles.primaryText}>Change players</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[
-          styles.captainButton,
-          styles.actionButton,
-          activeAction === 'captain' && captainPickerVisible && styles.actionButtonActive,
-          !captainOptions.length && styles.secondaryDisabled,
-        ]}
-        disabled={!captainOptions.length}
-        onPress={() => {
-          if (!captainOptions.length) {
-            Alert.alert('No players selected', 'Add players before choosing a captain.');
-            return;
-          }
-          if (!canChangeCaptain) {
-            Alert.alert('Captain change', `You can change your captain in ${captainDaysLeft} day${captainDaysLeft === 1 ? '' : 's'}.`);
-            return;
-          }
-          setActiveAction('captain');
-          setCaptainPickerVisible(true);
-        }}
-        activeOpacity={0.82}
-      >
-        <Text style={styles.primaryText}>Choose captain</Text>
-      </TouchableOpacity>
+      <View ref={changePlayersBtnRef} style={styles.actionAnchor}>
+        <TouchableOpacity
+          style={[
+            styles.primaryButton,
+            styles.actionButton,
+            activeAction === 'change' && isEditing && styles.actionButtonActive,
+          ]}
+          onPress={handleChangePlayers}
+          activeOpacity={0.88}
+        >
+          <Text style={styles.primaryText}>{t('squad.changePlayers')}</Text>
+        </TouchableOpacity>
+      </View>
+      <View ref={captainBtnRef} style={styles.actionAnchor}>
+        <TouchableOpacity
+          style={[
+            styles.captainButton,
+            styles.actionButton,
+            activeAction === 'captain' && captainPickerVisible && styles.actionButtonActive,
+            !captainOptions.length && styles.secondaryDisabled,
+          ]}
+          disabled={!captainOptions.length}
+          onPress={() => {
+            if (!captainOptions.length) {
+              Alert.alert(t('squad.noPlayersSelected'), t('squad.addPlayersBeforeCaptain'));
+              return;
+            }
+            if (!canChangeCaptain) {
+              Alert.alert(t('squad.captainChange'), t('squad.captainChangeInDays', { count: captainDaysLeft }));
+              return;
+            }
+            setActiveAction('captain');
+            setCaptainPickerVisible(true);
+          }}
+          activeOpacity={0.82}
+        >
+          <Text style={styles.primaryText}>{t('squad.chooseCaptain')}</Text>
+        </TouchableOpacity>
+      </View>
     </View>
 
         <View style={styles.infoCard}>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Budget remaining</Text>
+            <Text style={styles.infoLabel}>{t('squad.budgetRemaining')}</Text>
             <Text style={styles.infoValue}>
               {remainingBudget.toFixed(1)}k{' '}
               <Text style={styles.infoMuted}>/ {SEASON_BUDGET_CREDITS.toFixed(1)}k</Text>
             </Text>
           </View>
           <View style={styles.needBlock}>
-            <Text style={styles.infoLabel}>Need</Text>
+            <Text style={styles.infoLabel}>{t('squad.need')}</Text>
             <View style={styles.needChips}>
               {(['U', 'A', 'V', 'F'] as const).map(key => {
                 const value = neededText[key];
@@ -716,15 +864,18 @@ export default function SquadBuilder({ showClose = true }: Props) {
               })}
             </View>
             {neededText.U === 0 && neededText.A === 0 && neededText.V === 0 && neededText.F === 0 ? (
-              <Text style={styles.needHelper}>All positions filled</Text>
+              <Text style={styles.needHelper}>{t('squad.allPositionsFilled')}</Text>
             ) : null}
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Transfers left</Text>
+            <Text style={styles.infoLabel}>{t('squad.transfersLeft')}</Text>
             <Text style={styles.infoValue}>
               {displayTransfers}
               {pendingTransfersUsed > 0 ? (
-                <Text style={styles.infoMuted}> (using {pendingTransfersUsed})</Text>
+                <Text style={styles.infoMuted}>
+                  {' '}
+                  ({t('squad.usingTransfers', { count: pendingTransfersUsed })})
+                </Text>
               ) : null}
             </Text>
           </View>
@@ -740,7 +891,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
 
         {isEditing ? (
           <TouchableOpacity style={styles.cancelButton} onPress={handleCancelChanges}>
-            <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -757,7 +908,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Pick player</Text>
+                <Text style={styles.modalTitle}>{t('squad.pickPlayer')}</Text>
                 <TouchableOpacity
                   onPress={() => {
                     setPickerVisible(false);
@@ -766,7 +917,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
                   }}
                   hitSlop={10}
                 >
-                  <Text style={styles.link}>Close</Text>
+                  <Text style={styles.link}>{t('common.close')}</Text>
                 </TouchableOpacity>
               </View>
               <View style={styles.searchRow}>
@@ -774,7 +925,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
                 <TextInput
                   value={pickerSearch}
                   onChangeText={setPickerSearch}
-                  placeholder="Search players…"
+                  placeholder={t('squad.searchPlayers')}
                   placeholderTextColor="rgba(255,255,255,0.55)"
                   style={styles.searchInput}
                   autoCorrect={false}
@@ -799,7 +950,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
                           {item.team} · {item.position} ·{' '}
                           {((item.price_final ?? item.price)?.toFixed(1) ?? '--') + 'k'}
                         </Text>
-                        {isLocked ? <Text style={styles.lockedLabel}>Locked today</Text> : null}
+                        {isLocked ? <Text style={styles.lockedLabel}>{t('squad.lockedTodayLabel')}</Text> : null}
                       </View>
                       <Text style={styles.playerPrice}>
                         {((item.price_final ?? item.price)?.toFixed(1) ?? '--') + 'k'}
@@ -827,7 +978,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
           <View style={styles.modalOverlay}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Choose captain</Text>
+                <Text style={styles.modalTitle}>{t('squad.chooseCaptain')}</Text>
                 <TouchableOpacity
                   onPress={() => {
                     setCaptainPickerVisible(false);
@@ -835,7 +986,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
                   }}
                   hitSlop={10}
                 >
-                  <Text style={styles.link}>Close</Text>
+                  <Text style={styles.link}>{t('common.close')}</Text>
                 </TouchableOpacity>
               </View>
               <FlatList
@@ -849,12 +1000,12 @@ export default function SquadBuilder({ showClose = true }: Props) {
                       disabled={isLocked}
                       onPress={() => {
                         if (isLocked) {
-                          Alert.alert('Locked', 'Locked: this player has a match today.');
+                          Alert.alert(t('common.locked'), t('squad.lockedToday'));
                           return;
                         }
                         chooseCaptain(item.id).then(result => {
                           if (!result?.ok && result?.error) {
-                            Alert.alert('Captain change blocked', result.error);
+                            Alert.alert(t('squad.captainChangeBlocked'), result.error);
                           }
                           if (result?.ok) {
                             setCaptainPickerVisible(false);
@@ -869,7 +1020,7 @@ export default function SquadBuilder({ showClose = true }: Props) {
                         <Text style={styles.playerMeta}>
                           {item.team} · {item.position}
                         </Text>
-                        {isLocked ? <Text style={styles.lockedLabel}>Locked today</Text> : null}
+                        {isLocked ? <Text style={styles.lockedLabel}>{t('squad.lockedTodayLabel')}</Text> : null}
                       </View>
                       <Text style={styles.playerPrice}>
                         {((item.price_final ?? item.price)?.toFixed(1) ?? '--') + 'k'}
@@ -885,6 +1036,16 @@ export default function SquadBuilder({ showClose = true }: Props) {
           </View>
         </Modal>
       </ScrollView>
+      <CoachMarks
+        visible={coachMarksVisible}
+        steps={coachSteps}
+        onSkip={() => {
+          void finishCoachMarks({ action: 'skip' });
+        }}
+        onDone={() => {
+          void finishCoachMarks({ action: 'done' });
+        }}
+      />
     </AppBackground>
   );
 }
@@ -948,6 +1109,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 10,
+  },
+  actionAnchor: {
+    flex: 1,
   },
   primaryButton: {
     borderRadius: 16,
@@ -1013,6 +1177,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 4,
+  },
+  topActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  helpInlineBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helpInlineBtnPressed: {
+    opacity: 0.8,
+    transform: [{ scale: 0.98 }],
   },
   title: {
     color: '#F8FAFC',

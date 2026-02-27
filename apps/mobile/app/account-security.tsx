@@ -8,6 +8,7 @@ import { AppBackground } from '../src/components/AppBackground';
 import { COLORS } from '../src/theme/colors';
 import { getSupabaseClient } from '../src/lib/supabaseClient';
 import { useAuth } from '../src/providers/AuthProvider';
+import { useTranslation } from 'react-i18next';
 
 type SecurityState = {
   email: string | null;
@@ -74,6 +75,7 @@ async function withHardTimeout<T>(operation: Promise<T>, timeoutMs: number, code
 }
 
 export default function AccountSecurityScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
   const [sendingReset, setSendingReset] = useState(false);
@@ -140,7 +142,7 @@ export default function AccountSecurityScreen() {
   const handleSendReset = async () => {
     if (sendingReset) return;
     if (!state.email) {
-      Alert.alert('Missing email', 'No email found for this account.');
+      Alert.alert(t('accountSecurity.missingEmailTitle'), t('accountSecurity.missingEmailBody'));
       return;
     }
     setSendingReset(true);
@@ -160,16 +162,16 @@ export default function AccountSecurityScreen() {
       if (__DEV__) {
         console.log('[RESET-PW] request ok');
       }
-      Alert.alert('Success', 'Password reset email sent');
+      Alert.alert(t('common.saved'), t('accountSecurity.resetEmailSent'));
     } catch (err: any) {
       if (__DEV__) {
         console.log('[RESET-PW] request failed', err instanceof Error ? err.message : String(err ?? ''));
       }
       const message = err instanceof Error ? err.message : String(err ?? '');
       if (message.includes('TIMEOUT')) {
-        Alert.alert('Reset failed', 'Request timed out. Please try again.');
+        Alert.alert(t('accountSecurity.resetFailedTitle'), t('accountSecurity.resetTimeout'));
       } else {
-        Alert.alert('Reset failed', err?.message ?? 'Could not send password reset email.');
+        Alert.alert(t('accountSecurity.resetFailedTitle'), err?.message ?? t('accountSecurity.resetFailedBody'));
       }
     } finally {
       setSendingReset(false);
@@ -179,7 +181,7 @@ export default function AccountSecurityScreen() {
   const handleCopy = (value: string | null) => {
     if (!value) return;
     Clipboard.setString(value);
-    Alert.alert('Copied');
+    Alert.alert(t('accountSecurity.copied'));
   };
 
   if (authLoading) {
@@ -209,30 +211,31 @@ export default function AccountSecurityScreen() {
                 onPress={() => router.back()}
               >
                 <Ionicons name="chevron-back" size={18} color={COLORS.text} />
-                <Text style={styles.headerBackText}>Back</Text>
+                <Text style={styles.headerBackText}>{t('common.back')}</Text>
               </Pressable>
-              <Text style={styles.headerTitle}>Account Security</Text>
+              <Text style={styles.headerTitle}>{t('accountSecurity.title')}</Text>
               <View style={styles.headerSpacer} />
             </View>
 
             <View style={styles.card}>
               <Field
-                label="Email"
+                label={t('auth.email')}
                 value={state.email ?? '—'}
               />
-              <Field label="Auth provider" value={providerLabel} />
+              <Field label={t('accountSecurity.authProvider')} value={providerLabel} />
               <Field
-                label="Support ID"
+                label={t('accountSecurity.supportId')}
                 value={shortUserId}
                 mono
                 onCopy={state.userId ? () => handleCopy(state.userId) : undefined}
+                copyLabel={t('accountSecurity.copy')}
               />
             </View>
 
             {!state.isOAuth ? (
               <View style={styles.actionSection}>
                 <Text style={styles.helperText}>
-                  We’ll email you a reset link.
+                  {t('accountSecurity.resetHint')}
                 </Text>
                 <Pressable
                   style={({ pressed }) => [
@@ -248,7 +251,7 @@ export default function AccountSecurityScreen() {
                   {sendingReset ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.primaryButtonText}>Send password reset email</Text>
+                    <Text style={styles.primaryButtonText}>{t('accountSecurity.sendReset')}</Text>
                   )}
                 </Pressable>
               </View>
@@ -256,8 +259,8 @@ export default function AccountSecurityScreen() {
               <View style={styles.oauthCallout}>
                 <Text style={styles.oauthCalloutText}>
                   {state.isGoogle
-                    ? "You’re signed in with Google. Password changes are managed in your Google account."
-                    : `You’re signed in with ${providerLabel}. Password changes are managed in your ${providerLabel} account.`}
+                    ? t('accountSecurity.googleManaged')
+                    : t('accountSecurity.providerManaged', { provider: providerLabel })}
                 </Text>
               </View>
             )}
@@ -273,11 +276,13 @@ function Field({
   value,
   mono = false,
   onCopy,
+  copyLabel = 'Copy',
 }: {
   label: string;
   value: string;
   mono?: boolean;
   onCopy?: (() => void) | undefined;
+  copyLabel?: string;
 }) {
   return (
     <View style={styles.fieldRow}>
@@ -286,7 +291,7 @@ function Field({
         {onCopy ? (
           <Pressable style={({ pressed }) => [styles.copyBtn, pressed && styles.pressed]} onPress={onCopy}>
             <Ionicons name="copy-outline" size={14} color={COLORS.muted} />
-            <Text style={styles.copyBtnText}>Copy</Text>
+            <Text style={styles.copyBtnText}>{copyLabel}</Text>
           </Pressable>
         ) : null}
       </View>

@@ -25,18 +25,20 @@ import { useAuth } from '../../src/providers/AuthProvider';
 import { COLORS } from '../../src/theme/colors';
 import { OnboardingModal } from '../../src/components/onboarding/OnboardingModal';
 import { useOnboarding } from '../../src/hooks/useOnboarding';
+import { useTour } from '../../src/providers/TourProvider';
+import { useTranslation } from 'react-i18next';
+import { AppLanguage, getCurrentAppLanguage, setAppLanguage } from '../../src/i18n';
 
 const SEASON = '2025-26';
 const SUPPORT_EMAIL = 'lvfloorballfantasy@gmail.com';
 const DELETE_CONFIRM_TEXT = 'DELETE';
 const NICKNAME_COOLDOWN_DAYS = 30;
+const LEGAL_ALLOWED_HOST = 'markussdumpis.github.io';
 const LEGAL_DOCS = {
   privacy: {
-    title: 'Privacy Policy',
     url: 'https://markussdumpis.github.io/lv-floorball-fantasy/privacy.html',
   },
   terms: {
-    title: 'Terms of Service',
     url: 'https://markussdumpis.github.io/lv-floorball-fantasy/terms.html',
   },
 } as const;
@@ -98,6 +100,7 @@ async function withHardTimeout<T>(
 
 export default function Profile() {
   const { user, loading, signOut } = useAuth();
+  const { t } = useTranslation();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const [error, setError] = useState<string | null>(null);
@@ -122,15 +125,18 @@ export default function Profile() {
   const [legalLoading, setLegalLoading] = useState(false);
   const [legalError, setLegalError] = useState<string | null>(null);
   const [forcingLogout, setForcingLogout] = useState(false);
+  const [languageSheetVisible, setLanguageSheetVisible] = useState(false);
   const {
     visible: onboardingVisible,
     openManual: openOnboardingManual,
     finishOnboarding,
     submitting: onboardingSubmitting,
   } = useOnboarding({ autoShow: false });
+  const { lastRequest, startTour } = useTour();
   const scrollRef = useRef<ScrollView | null>(null);
   const legalVisibleRef = useRef(false);
   const legalErrorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastHandledTourRequestRef = useRef(0);
 
   const performanceLoading = loading;
 
@@ -150,6 +156,13 @@ export default function Profile() {
       displayName,
     });
   }, [displayName, nickname, user?.email, user?.id]);
+
+  useEffect(() => {
+    if (!lastRequest || lastRequest.id === lastHandledTourRequestRef.current) return;
+    if (lastRequest.tourId !== 'MAIN_ONBOARDING') return;
+    lastHandledTourRequestRef.current = lastRequest.id;
+    openOnboardingManual();
+  }, [lastRequest, openOnboardingManual]);
 
   const nicknameCooldownDaysRemaining = useMemo(() => {
     if (!nicknameUpdatedAt) return 0;
@@ -182,9 +195,9 @@ export default function Profile() {
   };
 
   const handleSignOut = () => {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign out', style: 'destructive', onPress: handleSignOutConfirmed },
+    Alert.alert(t('settings.signOut'), t('profile.signOutConfirm'), [
+      { text: t('common.cancel'), style: 'cancel' },
+      { text: t('settings.signOut'), style: 'destructive', onPress: handleSignOutConfirmed },
     ]);
   };
 
@@ -227,7 +240,7 @@ export default function Profile() {
         accessToken = sessionData?.session?.access_token ?? null;
       }
       if (!accessToken) {
-        Alert.alert('Delete account failed', 'Your session expired. Please sign in again.');
+        Alert.alert(t('profile.deleteFailedTitle'), t('profile.sessionExpiredSignInAgain'));
         return false;
       }
 
@@ -269,9 +282,9 @@ export default function Profile() {
       return true;
     } catch (e: any) {
       if (isTimeoutLikeError(e)) {
-        Alert.alert('Delete account failed', 'Session check timed out. Please try again.');
+        Alert.alert(t('profile.deleteFailedTitle'), t('profile.sessionCheckTimeout'));
       } else {
-        Alert.alert('Delete account failed', e?.message ?? 'Unable to delete account right now.');
+        Alert.alert(t('profile.deleteFailedTitle'), e?.message ?? t('profile.unableDeleteNow'));
       }
       return false;
     } finally {
@@ -498,6 +511,8 @@ export default function Profile() {
     [user?.email],
   );
   const activeLegalDoc = legalDocKey ? LEGAL_DOCS[legalDocKey] : null;
+  const currentLanguage = getCurrentAppLanguage();
+  const currentLanguageLabel = currentLanguage === 'lv' ? t('language.latvian') : t('language.english');
 
   useEffect(() => {
     legalVisibleRef.current = Boolean(activeLegalDoc);
@@ -560,14 +575,27 @@ export default function Profile() {
     }, 220);
   };
 
+  const handleShouldStartLegalLoad = useCallback((request: { url?: string }) => {
+    const nextUrl = request.url ?? '';
+    if (!nextUrl) return false;
+    if (nextUrl.startsWith('about:blank')) return true;
+    const escapedHost = LEGAL_ALLOWED_HOST.replace('.', '\\.');
+    const allowedPattern = new RegExp(`^https://${escapedHost}/`, 'i');
+    const isAllowed = allowedPattern.test(nextUrl);
+    if (!isAllowed) {
+      setLegalError(t('profile.legalLoadFailedTitle'));
+    }
+    return isAllowed;
+  }, [t]);
+
   const openLegalInBrowser = useCallback(async () => {
     if (!activeLegalDoc) return;
     try {
       await Linking.openURL(activeLegalDoc.url);
     } catch {
-      Alert.alert('Unable to open browser', 'Please try again later.');
+      Alert.alert(t('profile.unableOpenBrowserTitle'), t('profile.tryAgainLater'));
     }
-  }, [activeLegalDoc]);
+  }, [activeLegalDoc, t]);
 
   const handleSupportPress = useCallback(async () => {
     try {
@@ -582,13 +610,13 @@ export default function Profile() {
       }
 
       Alert.alert(
-        'No email app available',
-        `Please set up an email app on this device, or email us at ${SUPPORT_EMAIL}.`,
+        t('profile.noEmailAppTitle'),
+        t('profile.noEmailAppBody', { email: SUPPORT_EMAIL }),
       );
     } catch {
       Alert.alert(
-        'Unable to open email app',
-        `Please email us at ${SUPPORT_EMAIL} and include details about your issue.`,
+        t('profile.unableOpenEmailTitle'),
+        t('profile.unableOpenEmailBody', { email: SUPPORT_EMAIL }),
       );
     }
   }, [supportMailto]);
@@ -601,6 +629,11 @@ export default function Profile() {
       router.push('/diagnostics');
     }
     setTimeout(() => setVersionTapCount(0), 4000);
+  };
+
+  const handleLanguageSelect = async (lang: AppLanguage) => {
+    await setAppLanguage(lang);
+    setLanguageSheetVisible(false);
   };
 
   const saveNickname = async () => {
@@ -673,47 +706,54 @@ export default function Profile() {
           showsVerticalScrollIndicator={false}
           bounces
         >
-          <Text style={styles.screenTitle}>Profile</Text>
+          <Text style={styles.screenTitle}>{t('nav.profile')}</Text>
 
           <ProfileHeader
             initials={initials}
             displayName={displayName}
             email={user?.email ?? '—'}
-            seasonLabel="Season 2025/2026"
+            seasonLabel={t('profile.seasonBadge', {
+              season: '2025/2026',
+              defaultValue: `Season 2025/2026`,
+            })}
           />
 
           <View style={styles.sectionBlock}>
-            <Text style={styles.sectionTitle}>Performance snapshot</Text>
+            <Text style={styles.sectionTitle}>{t('profile.performanceSnapshot')}</Text>
             <View style={styles.grid}>
               <StatTile
                 icon="trophy-outline"
-                label="Total points"
+                label={t('profile.totalPoints')}
                 value={formatStatValue(
                   performanceLoading || pointsLoading,
                   '—',
                   seasonPoints == null ? '—' : formatPoints(seasonPoints),
                 )}
-                hint="Current season"
+                hint={t('profile.currentSeason', { defaultValue: 'Current season' })}
               />
               <StatTile
                 icon="stats-chart-outline"
-                label="Place"
-                value={formatStatValue(performanceLoading || pointsLoading, 'Unranked', rank ? `#${rank}` : 'Unranked')}
-                hint="League ranking"
+                label={t('profile.place')}
+                value={formatStatValue(
+                  performanceLoading || pointsLoading,
+                  t('profile.unranked'),
+                  rank ? `#${rank}` : t('profile.unranked'),
+                )}
+                hint={t('profile.leagueRanking')}
               />
               <StatTile
                 icon="calendar-clear-outline"
-                label="Gameweeks played"
+                label={t('profile.gameweeksPlayed')}
                 value={
                   performanceLoading || pointsLoading
                     ? '—'
                     : formatStatValue(false, '0', (gameweeksPlayed ?? 0).toString())
                 }
-                hint="Distinct submitted weeks"
+                hint={t('profile.distinctSubmittedWeeks')}
               />
               <StatTile
                 icon="flash-outline"
-                label="Best rank"
+                label={t('profile.bestRank')}
                 value={
                   performanceLoading || pointsLoading
                     ? '—'
@@ -721,22 +761,25 @@ export default function Profile() {
                     ? `#${bestRank}`
                     : '—'
                 }
-                hint="Lowest rank achieved"
+                hint={t('profile.lowestRankAchieved')}
               />
             </View>
           </View>
 
           <View style={styles.sectionBlock}>
-            <Text style={styles.sectionTitle}>Settings</Text>
+            <Text style={styles.sectionTitle}>{t('settings.title')}</Text>
             <View style={styles.settingsCard}>
               <SettingsRow
                 icon="create-outline"
-                title="Change Nickname"
+                title={t('settings.changeNickname')}
                 value={
                   nicknameCooldownDaysRemaining > 0
-                    ? `Available in ${nicknameCooldownDaysRemaining} days`
+                    ? t('profile.nicknameAvailableInDays', {
+                        count: nicknameCooldownDaysRemaining,
+                        defaultValue: `Available in ${nicknameCooldownDaysRemaining} days`,
+                      })
                     : nicknameSavedAt
-                    ? 'Saved'
+                    ? t('common.saved')
                     : displayName
                 }
                 disabled={nicknameCooldownDaysRemaining > 0}
@@ -748,36 +791,44 @@ export default function Profile() {
               />
               <SettingsRow
                 icon="person-circle-outline"
-                title="Manage account"
+                title={t('settings.manageAccount')}
                 onPress={() => {
                   router.push('/account-security');
                 }}
               />
               <SettingsRow
+                icon="language-outline"
+                title={t('settings.language')}
+                value={currentLanguageLabel}
+                onPress={() => setLanguageSheetVisible(true)}
+              />
+              <SettingsRow
                 icon="information-circle-outline"
-                title="How it works"
-                onPress={openOnboardingManual}
+                title={t('settings.howItWorks')}
+                onPress={() => {
+                  startTour('MAIN_ONBOARDING', { restart: true, source: 'settings_profile' });
+                }}
               />
               <SettingsRow
                 icon="shield-checkmark-outline"
-                title="Privacy Policy"
+                title={t('settings.privacyPolicy')}
                 onPress={() => openLegalDoc('privacy')}
               />
               <SettingsRow
                 icon="document-text-outline"
-                title="Terms of Service"
+                title={t('settings.termsOfService')}
                 onPress={() => openLegalDoc('terms')}
               />
               <SettingsRow
                 icon="help-buoy-outline"
-                title="Support"
+                title={t('settings.support')}
                 onPress={() => {
                   void handleSupportPress();
                 }}
               />
               <SettingsRow
                 icon="log-out-outline"
-                title="Sign out"
+                title={t('settings.signOut')}
                 destructive
                 disabled={deletingData}
                 loading={signingOut}
@@ -786,7 +837,7 @@ export default function Profile() {
               />
               <SettingsRow
                 icon="trash-outline"
-                title="Delete account"
+                title={t('settings.deleteAccount')}
                 destructive
                 disabled={deletingData}
                 loading={deletingData}
@@ -798,8 +849,8 @@ export default function Profile() {
           </View>
 
           <Pressable style={styles.footer} onPress={handleVersionTap}>
-            <Text style={styles.versionText}>App version {appVersion}</Text>
-            <Text style={styles.versionHint}>Tap 7x for diagnostics</Text>
+            <Text style={styles.versionText}>{t('profile.appVersion', { version: appVersion })}</Text>
+            <Text style={styles.versionHint}>{t('profile.tapDiagnostics')}</Text>
           </Pressable>
         </ScrollView>
 
@@ -813,11 +864,11 @@ export default function Profile() {
             <Pressable style={StyleSheet.absoluteFill} onPress={() => setEditNicknameVisible(false)} />
             <View style={styles.sheet}>
               <View style={styles.sheetHandle} />
-              <Text style={styles.sheetTitle}>Edit nickname</Text>
-              <Text style={styles.sheetSubtitle}>Choose how your name appears in leaderboards.</Text>
+              <Text style={styles.sheetTitle}>{t('profile.editNickname')}</Text>
+              <Text style={styles.sheetSubtitle}>{t('profile.editNicknameSubtitle')}</Text>
               <TextInput
                 style={styles.sheetInput}
-                placeholder="Enter nickname"
+                placeholder={t('auth.nickname')}
                 placeholderTextColor={COLORS.muted2}
                 value={nicknameInput}
                 onChangeText={setNicknameInput}
@@ -832,7 +883,7 @@ export default function Profile() {
                   onPress={() => setEditNicknameVisible(false)}
                   disabled={nicknameSaving}
                 >
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                  <Text style={styles.cancelBtnText}>{t('common.cancel')}</Text>
                 </Pressable>
                 <Pressable
                   style={({ pressed }) => [
@@ -846,10 +897,59 @@ export default function Profile() {
                   {nicknameSaving ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.saveBtnText}>Save</Text>
+                    <Text style={styles.saveBtnText}>{t('common.save')}</Text>
                   )}
                 </Pressable>
               </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          animationType="slide"
+          transparent
+          visible={languageSheetVisible}
+          onRequestClose={() => setLanguageSheetVisible(false)}
+        >
+          <View style={styles.modalBackdrop}>
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => setLanguageSheetVisible(false)} />
+            <View style={styles.sheet}>
+              <View style={styles.sheetHandle} />
+              <Text style={styles.sheetTitle}>{t('language.selectLanguage')}</Text>
+              <View style={styles.sheetActions}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.sheetBtn,
+                    styles.cancelBtn,
+                    currentLanguage === 'en' && styles.langActiveBtn,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => {
+                    void handleLanguageSelect('en');
+                  }}
+                >
+                  <Text style={styles.cancelBtnText}>🇬🇧 {t('language.english')}</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.sheetBtn,
+                    styles.cancelBtn,
+                    currentLanguage === 'lv' && styles.langActiveBtn,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={() => {
+                    void handleLanguageSelect('lv');
+                  }}
+                >
+                  <Text style={styles.cancelBtnText}>🇱🇻 {t('language.latvian')}</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                style={({ pressed }) => [styles.langCloseBtn, pressed && styles.pressed]}
+                onPress={() => setLanguageSheetVisible(false)}
+              >
+                <Text style={styles.cancelBtnText}>{t('common.close')}</Text>
+              </Pressable>
             </View>
           </View>
         </Modal>
@@ -864,7 +964,7 @@ export default function Profile() {
             <Pressable style={StyleSheet.absoluteFill} onPress={closeDeleteConfirmModal} disabled={deletingData} />
             <View style={[styles.sheet, styles.deleteSheet]}>
               <View style={styles.sheetHandle} />
-              <Text style={[styles.sheetTitle, styles.deleteSheetTitle]}>Delete Account</Text>
+              <Text style={[styles.sheetTitle, styles.deleteSheetTitle]}>{t('settings.deleteAccount')}</Text>
               <Text style={[styles.sheetSubtitle, styles.deleteSheetSubtitle]}>
                 This will permanently delete your account and data. This action cannot be undone.
               </Text>
@@ -876,7 +976,7 @@ export default function Profile() {
               >
                 <TextInput
                   style={styles.deleteInput}
-                  placeholder="Type DELETE to confirm"
+                  placeholder={t('profile.typeDeletePlaceholder')}
                   placeholderTextColor={COLORS.muted2}
                   value={deleteConfirmInput}
                   onChangeText={value => {
@@ -898,7 +998,7 @@ export default function Profile() {
                 ) : null}
               </View>
               {deleteAttempted && deleteConfirmInput !== DELETE_CONFIRM_TEXT ? (
-                <Text style={styles.deleteHelperText}>Type DELETE exactly to enable account deletion.</Text>
+                <Text style={styles.deleteHelperText}>{t('profile.typeDeleteHelper')}</Text>
               ) : null}
               <View style={styles.deleteActions}>
                 <Pressable
@@ -906,7 +1006,7 @@ export default function Profile() {
                   onPress={closeDeleteConfirmModal}
                   disabled={deletingData}
                 >
-                  <Text style={styles.deleteCloseBtnText}>Close</Text>
+                  <Text style={styles.deleteCloseBtnText}>{t('common.close')}</Text>
                 </Pressable>
                 <Pressable
                   accessibilityState={{ disabled: deleteConfirmInput !== DELETE_CONFIRM_TEXT || deletingData }}
@@ -924,7 +1024,7 @@ export default function Profile() {
                   {deletingData ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.deleteBtnText}>Delete account</Text>
+                    <Text style={styles.deleteBtnText}>{t('settings.deleteAccount')}</Text>
                   )}
                 </Pressable>
               </View>
@@ -953,10 +1053,14 @@ export default function Profile() {
                   onPress={closeLegalDoc}
                 >
                   <Ionicons name="chevron-back" size={18} color={COLORS.text} />
-                  <Text style={styles.legalHeaderBtnText}>Back</Text>
+                  <Text style={styles.legalHeaderBtnText}>{t('common.back')}</Text>
                 </Pressable>
                 <Text numberOfLines={1} style={styles.legalHeaderTitle}>
-                  {activeLegalDoc?.title ?? ''}
+                  {legalDocKey === 'privacy'
+                    ? t('settings.privacyPolicy')
+                    : legalDocKey === 'terms'
+                    ? t('settings.termsOfService')
+                    : ''}
                 </Text>
                 <Pressable
                   style={({ pressed }) => [styles.legalCloseBtn, pressed && styles.pressed]}
@@ -971,6 +1075,8 @@ export default function Profile() {
                   <View style={styles.webViewWrap}>
                     <WebView
                       source={{ uri: activeLegalDoc.url }}
+                      originWhitelist={['https://*']}
+                      onShouldStartLoadWithRequest={handleShouldStartLegalLoad}
                       onLoadStart={handleLegalLoadStart}
                       onLoadEnd={handleLegalLoadEnd}
                       onError={handleLegalError}
@@ -985,7 +1091,7 @@ export default function Profile() {
                 ) : (
                   <View style={styles.legalFallback}>
                     <Ionicons name="warning-outline" size={40} color="rgba(255,255,255,0.85)" />
-                    <Text style={styles.legalFallbackTitle}>Could not load this page</Text>
+                    <Text style={styles.legalFallbackTitle}>{t('profile.legalLoadFailedTitle')}</Text>
                     <Text style={styles.legalFallbackText}>
                       {legalError ?? 'Please open this document in your browser.'}
                     </Text>
@@ -993,7 +1099,7 @@ export default function Profile() {
                       style={({ pressed }) => [styles.legalBrowserBtn, pressed && styles.pressed]}
                       onPress={openLegalInBrowser}
                     >
-                      <Text style={styles.legalBrowserBtnText}>Open in browser</Text>
+                      <Text style={styles.legalBrowserBtnText}>{t('profile.openInBrowser')}</Text>
                     </Pressable>
                   </View>
                 )}
@@ -1428,6 +1534,20 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
+  },
+  langActiveBtn: {
+    borderColor: 'rgba(143, 180, 255, 0.5)',
+    backgroundColor: 'rgba(143, 180, 255, 0.16)',
+  },
+  langCloseBtn: {
+    marginTop: 10,
+    minHeight: 44,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   deleteSheet: {
     paddingTop: 12,

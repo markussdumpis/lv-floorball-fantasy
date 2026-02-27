@@ -17,6 +17,8 @@ import { useAuth } from '../../src/providers/AuthProvider';
 import { looksLikeEmail, sanitizeEmail } from '../../src/utils/email';
 import { COLORS } from '../../src/theme/colors';
 import { AuthShell } from '../../src/components/auth/AuthShell';
+import { useTranslation } from 'react-i18next';
+import { AppLanguage, getCurrentAppLanguage, setAppLanguage } from '../../src/i18n';
 
 type Mode = 'signIn' | 'signUp';
 
@@ -26,7 +28,8 @@ type Props = {
 
 export function AuthScreen({ initialMode = 'signIn' }: Props) {
   const router = useRouter();
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle, setNickname: setProfileNickname, setNicknameForUser, signOut, loading: authLoading } = useAuth();
+  const { t } = useTranslation();
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle, setNicknameForUser, signOut, loading: authLoading } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -35,21 +38,22 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [nickname, setNickname] = useState('');
+  const [language, setLanguage] = useState<AppLanguage>(getCurrentAppLanguage());
 
   const handleEmailAuth = async () => {
     const sanitizedEmail = sanitizeEmail(email);
     const trimmedPassword = password.trim();
 
     if (!sanitizedEmail) {
-      setError('Email is required.');
+      setError(t('auth.errors.emailRequired'));
       return;
     }
     if (!trimmedPassword) {
-      setError('Password is required.');
+      setError(t('auth.errors.passwordRequired'));
       return;
     }
     if (!looksLikeEmail(sanitizedEmail)) {
-      setError('Please enter a valid email.');
+      setError(t('auth.errors.emailInvalid'));
       return;
     }
 
@@ -57,11 +61,11 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
     const trimmedNickname = nickname.trim();
     if (nicknameNeeded) {
       if (!trimmedNickname) {
-        setError('Nickname is required.');
+        setError(t('auth.errors.nicknameRequired'));
         return;
       }
       if (trimmedNickname.length < 3 || trimmedNickname.length > 20) {
-        setError('Nickname must be 3-20 characters.');
+        setError(t('auth.errors.nicknameLength'));
         return;
       }
     }
@@ -75,23 +79,23 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
         await signInWithEmail(sanitizedEmail, trimmedPassword);
         router.replace('/(tabs)');
       } else {
-        const session = await signUpWithEmail(sanitizedEmail, trimmedPassword, trimmedNickname);
+        const session = await signUpWithEmail(sanitizedEmail, trimmedPassword, trimmedNickname, language);
         if (session?.user?.id) {
           if (nicknameNeeded) {
             try {
               await setNicknameForUser(session.user.id, trimmedNickname);
             } catch (nickErr: any) {
-              setError(nickErr?.message ?? 'Failed to save nickname.');
+              setError(nickErr?.message ?? t('auth.errors.nicknameSaveFailed'));
               return;
             }
           }
           router.replace('/(tabs)');
         } else {
-          setMessage('Account created. If email confirmation is required, check your inbox.');
+          setMessage(t('auth.messages.accountCreated'));
         }
       }
     } catch (e: any) {
-      setError(e.message ?? 'Authentication failed.');
+      setError(e.message ?? t('auth.errors.authFailed'));
     } finally {
       setSubmitting(false);
     }
@@ -104,14 +108,14 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
     try {
       const session = await signInWithGoogle();
       if (!session) {
-        setError('We could not complete Google sign-in. Please try again.');
+        setError(t('auth.errors.googleIncomplete'));
         return;
       }
       if (mode === 'signUp') {
         // If user is trying to sign up but the Google account already exists,
         // show a friendly message and keep them on the auth screen.
         if (nickname.trim().length < 3) {
-          setError('Nickname is required to finish sign-up.');
+          setError(t('auth.errors.nicknameRequiredSignup'));
           await signOut();
           return;
         }
@@ -119,7 +123,7 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
         try {
           await setNicknameForUser(session.user.id, nick);
         } catch (nickErr: any) {
-          setError(nickErr?.message ?? 'Failed to save nickname.');
+          setError(nickErr?.message ?? t('auth.errors.nicknameSaveFailed'));
           await signOut();
           return;
         }
@@ -128,10 +132,15 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
       }
       router.replace('/(tabs)');
     } catch (e: any) {
-      setError(e.message ?? 'Google sign-in failed.');
+      setError(e.message ?? t('auth.errors.googleFailed'));
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleLanguagePick = async (lang: AppLanguage) => {
+    setLanguage(lang);
+    await setAppLanguage(lang);
   };
 
   return (
@@ -143,14 +152,43 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
             <View style={styles.glassCard}>
-              <Text style={styles.title}>{mode === 'signIn' ? 'Welcome back' : 'Create account'}</Text>
+              {mode === 'signUp' ? (
+                <View style={styles.langWrap}>
+                  <Text style={styles.langLabel}>{t('auth.language')}</Text>
+                  <View style={styles.langRow}>
+                    <TouchableOpacity
+                      style={[styles.langBtn, language === 'en' && styles.langBtnActive]}
+                      onPress={() => {
+                        void handleLanguagePick('en');
+                      }}
+                      disabled={submitting || authLoading}
+                    >
+                      <Text style={[styles.langBtnText, language === 'en' && styles.langBtnTextActive]}>
+                        🇬🇧 {t('language.english')}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.langBtn, language === 'lv' && styles.langBtnActive]}
+                      onPress={() => {
+                        void handleLanguagePick('lv');
+                      }}
+                      disabled={submitting || authLoading}
+                    >
+                      <Text style={[styles.langBtnText, language === 'lv' && styles.langBtnTextActive]}>
+                        🇱🇻 {t('language.latvian')}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
+              <Text style={styles.title}>{mode === 'signIn' ? t('auth.welcomeBack') : t('auth.createAccount')}</Text>
               <Text style={styles.subtitle}>
-                {mode === 'signIn' ? 'Sign in to manage your squad.' : 'Join to build your fantasy team.'}
+                {mode === 'signIn' ? t('auth.signInManage') : t('auth.joinTeam')}
               </Text>
 
               <TextInput
                 style={styles.input}
-                placeholder="Email"
+                placeholder={t('auth.email')}
                 placeholderTextColor={COLORS.muted2}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -162,7 +200,7 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
               />
               <TextInput
                 style={styles.input}
-                placeholder="Password"
+                placeholder={t('auth.password')}
                 placeholderTextColor={COLORS.muted2}
                 secureTextEntry
                 value={password}
@@ -171,7 +209,7 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
               {mode === 'signUp' ? (
                 <TextInput
                   style={styles.input}
-                  placeholder="Nickname (3-20 chars)"
+                  placeholder={t('auth.nicknamePlaceholder')}
                   placeholderTextColor={COLORS.muted2}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -192,7 +230,7 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
                   <Text style={styles.buttonText}>
-                    {mode === 'signIn' ? 'Sign In' : 'Create Account'}
+                    {mode === 'signIn' ? t('auth.signIn') : t('auth.createAccountCta')}
                   </Text>
                 )}
               </TouchableOpacity>
@@ -205,7 +243,7 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
                 {submitting ? (
                   <ActivityIndicator color={COLORS.text} />
                 ) : (
-                  <Text style={styles.googleText}>Continue with Google</Text>
+                  <Text style={styles.googleText}>{t('auth.continueGoogle')}</Text>
                 )}
               </TouchableOpacity>
 
@@ -215,8 +253,8 @@ export function AuthScreen({ initialMode = 'signIn' }: Props) {
               >
                 <Text style={styles.toggle}>
                   {mode === 'signIn'
-                    ? "Don't have an account? Sign up"
-                    : 'Already have an account? Sign in'}
+                    ? t('auth.dontHaveAccount')
+                    : t('auth.alreadyHaveAccount')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -257,6 +295,43 @@ const styles = StyleSheet.create({
     shadowRadius: 28,
     shadowOffset: { width: 0, height: 20 },
     elevation: 14,
+  },
+  langWrap: {
+    marginBottom: 14,
+  },
+  langLabel: {
+    color: COLORS.muted,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  langRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  langBtn: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  langBtnActive: {
+    borderColor: 'rgba(143, 180, 255, 0.46)',
+    backgroundColor: 'rgba(143, 180, 255, 0.15)',
+  },
+  langBtnText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  langBtnTextActive: {
+    color: '#E9F2FF',
   },
   title: {
     color: COLORS.text,

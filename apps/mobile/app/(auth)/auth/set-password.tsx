@@ -17,10 +17,12 @@ import { AppBackground } from '../../../src/components/AppBackground';
 import { COLORS } from '../../../src/theme/colors';
 import { getSupabaseClient } from '../../../src/lib/supabaseClient';
 import { useAuth } from '../../../src/providers/AuthProvider';
+import { useTranslation } from 'react-i18next';
 
 const MIN_PASSWORD_LENGTH = 8;
 
 export default function SetPasswordScreen() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { user, loading: authLoading, signOut } = useAuth();
   const [password, setPassword] = useState('');
@@ -39,11 +41,11 @@ export default function SetPasswordScreen() {
     const trimmedConfirm = confirmPassword.trim();
 
     if (trimmed.length < MIN_PASSWORD_LENGTH) {
-      Alert.alert('Invalid password', `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+      Alert.alert(t('setPassword.invalidPasswordTitle'), t('setPassword.invalidPasswordBody', { min: MIN_PASSWORD_LENGTH }));
       return;
     }
     if (trimmed !== trimmedConfirm) {
-      Alert.alert('Passwords do not match', 'Please enter the same password in both fields.');
+      Alert.alert(t('setPassword.passwordMismatchTitle'), t('setPassword.passwordMismatchBody'));
       return;
     }
 
@@ -59,10 +61,10 @@ export default function SetPasswordScreen() {
         await signOut();
       }
 
-      Alert.alert('Password updated', 'Please sign in with your new password.');
+      Alert.alert(t('setPassword.updatedTitle'), t('setPassword.updatedBody'));
       router.replace('/(auth)/login');
     } catch (err: any) {
-      Alert.alert('Update failed', err?.message ?? 'Could not update password.');
+      Alert.alert(t('setPassword.updateFailedTitle'), err?.message ?? t('setPassword.updateFailedBody'));
     } finally {
       setSubmitting(false);
     }
@@ -92,11 +94,11 @@ export default function SetPasswordScreen() {
           behavior={Platform.select({ ios: 'padding', android: undefined })}
         >
           <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            <Text style={styles.title}>Set New Password</Text>
-            <Text style={styles.subtitle}>Choose a new password for your account.</Text>
+            <Text style={styles.title}>{t('setPassword.title')}</Text>
+            <Text style={styles.subtitle}>{t('setPassword.subtitle')}</Text>
 
             <View style={styles.card}>
-              <Text style={styles.label}>New password</Text>
+              <Text style={styles.label}>{t('setPassword.newPassword')}</Text>
               <TextInput
                 value={password}
                 onChangeText={setPassword}
@@ -105,11 +107,11 @@ export default function SetPasswordScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 textContentType="newPassword"
-                placeholder="At least 8 characters"
+                placeholder={t('setPassword.atLeastChars', { min: MIN_PASSWORD_LENGTH })}
                 placeholderTextColor={COLORS.muted2}
               />
 
-              <Text style={styles.label}>Confirm password</Text>
+              <Text style={styles.label}>{t('setPassword.confirmPassword')}</Text>
               <TextInput
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
@@ -118,7 +120,7 @@ export default function SetPasswordScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 textContentType="newPassword"
-                placeholder="Repeat password"
+                placeholder={t('setPassword.repeatPassword')}
                 placeholderTextColor={COLORS.muted2}
               />
             </View>
@@ -133,7 +135,7 @@ export default function SetPasswordScreen() {
               {submitting ? (
                 <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Text style={styles.primaryButtonText}>Update password</Text>
+                <Text style={styles.primaryButtonText}>{t('setPassword.updatePassword')}</Text>
               )}
             </Pressable>
           </ScrollView>

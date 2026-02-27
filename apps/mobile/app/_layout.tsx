@@ -1,14 +1,51 @@
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import * as Linking from 'expo-linking';
 import { AuthProvider, useAuth } from '../src/providers/AuthProvider';
+import { TourProvider } from '../src/providers/TourProvider';
 import { COLORS } from '../src/theme/colors';
+import i18n, { initI18n } from '../src/i18n';
 
 export default function RootLayout() {
+  const [i18nReady, setI18nReady] = useState(false);
+  const [, setLangTick] = useState(0);
+
+  useEffect(() => {
+    let mounted = true;
+    void initI18n()
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setI18nReady(true);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onLanguageChanged = () => {
+      setLangTick(value => value + 1);
+    };
+    i18n.on('languageChanged', onLanguageChanged);
+    return () => {
+      i18n.off('languageChanged', onLanguageChanged);
+    };
+  }, []);
+
+  if (!i18nReady) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color={COLORS.accent} />
+      </View>
+    );
+  }
+
   return (
     <AuthProvider>
-      <AuthGate />
+      <TourProvider>
+        <AuthGate />
+      </TourProvider>
     </AuthProvider>
   );
 }
@@ -51,7 +88,7 @@ function AuthGate() {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={COLORS.accent} />
-        <Text style={styles.loadingText}>Loading account…</Text>
+        <Text style={styles.loadingText}>{i18n.t('app.loadingAccount')}</Text>
       </View>
     );
   }

@@ -1,0 +1,300 @@
+{
+  "app": {
+    "loadingAccount": "Ielādē kontu…"
+  },
+  "common": {
+    "back": "Atpakaļ",
+    "cancel": "Atcelt",
+    "close": "Aizvērt",
+    "done": "Pabeigt",
+    "next": "Tālāk",
+    "start": "Sākt",
+    "save": "Saglabāt",
+    "saved": "Saglabāts",
+    "skip": "Izlaist",
+    "stay": "Palikt",
+    "discard": "Atmest",
+    "retry": "Mēģināt vēlreiz",
+    "show": "Rādīt",
+    "hide": "Paslēpt",
+    "notice": "Paziņojums",
+    "locked": "Bloķēts",
+    "points": "Punkti",
+    "vs": "pret",
+    "unknown": "Nezināms",
+    "unknownPlayer": "Nezināms spēlētājs",
+    "stepOf": "Solis {{current}} no {{total}}",
+    "tipOf": "Padoms {{current}} no {{total}}",
+    "unsavedChanges": "Nesaglabātas izmaiņas",
+    "unsavedChangesBody": "Tev ir nesaglabātas sastāva izmaiņas. Saglabāt pirms aiziešanas?"
+  },
+  "nav": {
+    "home": "Sākums",
+    "squad": "Sastāvs",
+    "profile": "Profils",
+    "fixtures": "Spēles",
+    "myPoints": "Mani punkti"
+  },
+  "language": {
+    "english": "English",
+    "latvian": "Latviešu",
+    "selectLanguage": "Izvēlies valodu"
+  },
+  "auth": {
+    "welcomeBack": "Laipni atpakaļ",
+    "createAccount": "Izveidot kontu",
+    "joinTeam": "Pievienojies, lai izveidotu savu fantāzijas komandu.",
+    "signInManage": "Pieraksties, lai pārvaldītu savu sastāvu.",
+    "email": "E-pasts",
+    "password": "Parole",
+    "nickname": "Segvārds",
+    "nicknamePlaceholder": "Segvārds (3-20 rakstzīmes)",
+    "continueGoogle": "Turpināt ar Google",
+    "signIn": "Pierakstīties",
+    "createAccountCta": "Izveidot kontu",
+    "dontHaveAccount": "Nav konta? Reģistrēties",
+    "alreadyHaveAccount": "Jau ir konts? Pierakstīties",
+    "language": "Valoda",
+    "errors": {
+      "emailRequired": "E-pasts ir obligāts.",
+      "passwordRequired": "Parole ir obligāta.",
+      "emailInvalid": "Lūdzu ievadi derīgu e-pastu.",
+      "nicknameRequired": "Segvārds ir obligāts.",
+      "nicknameLength": "Segvārdam jābūt 3-20 rakstzīmēm.",
+      "authFailed": "Autentifikācija neizdevās.",
+      "googleFailed": "Google pierakstīšanās neizdevās.",
+      "googleIncomplete": "Google pierakstīšanos neizdevās pabeigt. Mēģini vēlreiz.",
+      "nicknameSaveFailed": "Neizdevās saglabāt segvārdu.",
+      "nicknameRequiredSignup": "Lai pabeigtu reģistrāciju, nepieciešams segvārds."
+    },
+    "messages": {
+      "accountCreated": "Konts izveidots. Ja nepieciešams e-pasta apstiprinājums, pārbaudi savu iesūtni."
+    }
+  },
+  "settings": {
+    "title": "Iestatījumi",
+    "changeNickname": "Mainīt segvārdu",
+    "manageAccount": "Pārvaldīt kontu",
+    "howItWorks": "Kā tas darbojas",
+    "privacyPolicy": "Privātuma politika",
+    "termsOfService": "Lietošanas noteikumi",
+    "support": "Atbalsts",
+    "signOut": "Izrakstīties",
+    "deleteAccount": "Dzēst kontu",
+    "language": "Valoda"
+  },
+  "home": {
+    "myTeam": "Mana komanda",
+    "draftMode": "Drafts",
+    "comingSoon": "Drīzumā",
+    "upcomingMatches": "Gaidāmās spēles",
+    "seeAll": "Skatīt visas",
+    "noUpcomingMatches": "Nav gaidāmo spēļu",
+    "leaderboard": "Līderu tops",
+    "loadingLeaderboard": "Ielādē līderu topu…",
+    "noLeaderboard": "Vēl nav līderu topa — esi pirmais",
+    "rulesPoints": "Noteikumi un punkti",
+    "rules": "Noteikumi",
+    "pointsShort": "{{count}} p"
+  },
+  "fixtures": {
+    "title": "Spēles",
+    "loading": "Ielādē spēles…",
+    "noUpcoming": "Nav gaidāmo spēļu",
+    "home": "Mājinieki",
+    "away": "Viesi",
+    "gw": "Ned. {{number}}"
+  },
+  "myPoints": {
+    "loading": "Ielādē tavus punktus…",
+    "position": "Pozīcija",
+    "captainBonus": "Kapitāna bonuss",
+    "seasonTotal": "Sezonas kopā: {{total}}",
+    "seasonLabel": "Sezona: {{season}}",
+    "empty": "Nav ko rādīt. Saglabā sastāvu, lai redzētu punktus."
+  },
+  "accountSecurity": {
+    "title": "Konta drošība",
+    "missingEmailTitle": "Trūkst e-pasts",
+    "missingEmailBody": "Šim kontam nav atrasts e-pasts.",
+    "resetEmailSent": "Paroles atiestatīšanas e-pasts nosūtīts",
+    "resetFailedTitle": "Atiestatīšana neizdevās",
+    "resetTimeout": "Pieprasījums pārsniedza laiku. Mēģini vēlreiz.",
+    "resetFailedBody": "Neizdevās nosūtīt paroles atiestatīšanas e-pastu.",
+    "copied": "Nokopēts",
+    "authProvider": "Autorizācijas nodrošinātājs",
+    "copy": "Kopēt",
+    "supportId": "Atbalsta ID",
+    "resetHint": "Nosūtīsim tev atiestatīšanas saiti e-pastā.",
+    "sendReset": "Nosūtīt paroles atiestatīšanas e-pastu",
+    "googleManaged": "Tu esi pieslēdzies ar Google. Paroles maiņa jāveic Google kontā.",
+    "providerManaged": "Tu esi pieslēdzies ar {{provider}}. Paroles maiņa jāveic {{provider}} kontā."
+  },
+  "setPassword": {
+    "title": "Iestatīt jaunu paroli",
+    "subtitle": "Izvēlies jaunu paroli savam kontam.",
+    "newPassword": "Jaunā parole",
+    "confirmPassword": "Apstiprini paroli",
+    "atLeastChars": "Vismaz {{min}} rakstzīmes",
+    "repeatPassword": "Atkārto paroli",
+    "updatePassword": "Atjaunot paroli",
+    "invalidPasswordTitle": "Nederīga parole",
+    "invalidPasswordBody": "Parolei jābūt vismaz {{min}} rakstzīmēm.",
+    "passwordMismatchTitle": "Paroles nesakrīt",
+    "passwordMismatchBody": "Ievadi vienādu paroli abos laukos.",
+    "updatedTitle": "Parole atjaunota",
+    "updatedBody": "Lūdzu pieslēdzies ar savu jauno paroli.",
+    "updateFailedTitle": "Atjaunināšana neizdevās",
+    "updateFailedBody": "Neizdevās atjaunināt paroli."
+  },
+  "profile": {
+    "performanceSnapshot": "Snieguma pārskats",
+    "totalPoints": "Kopējie punkti",
+    "currentSeason": "Šī sezona",
+    "seasonBadge": "Sezona {{season}}",
+    "place": "Vieta",
+    "unranked": "Bez vietas",
+    "leagueRanking": "Līgas rangs",
+    "gameweeksPlayed": "Nospēlētās nedēļas",
+    "distinctSubmittedWeeks": "Atšķirīgas iesniegtās nedēļas",
+    "bestRank": "Labākais rangs",
+    "lowestRankAchieved": "Augstākais sasniegtais rangs",
+    "nicknameAvailableInDays": "Pieejams pēc {{count}} dienas",
+    "nicknameAvailableInDays_plural": "Pieejams pēc {{count}} dienām",
+    "signOutConfirm": "Vai tiešām vēlies izrakstīties?",
+    "deleteFailedTitle": "Konta dzēšana neizdevās",
+    "sessionExpiredSignInAgain": "Sesija ir beigusies. Lūdzu pieslēdzies vēlreiz.",
+    "sessionCheckTimeout": "Sesijas pārbaude pārsniedza laiku. Mēģini vēlreiz.",
+    "unableDeleteNow": "Pašlaik kontu dzēst neizdevās.",
+    "unableOpenBrowserTitle": "Nevar atvērt pārlūku",
+    "tryAgainLater": "Lūdzu mēģini vēlāk.",
+    "noEmailAppTitle": "Nav pieejama e-pasta lietotne",
+    "noEmailAppBody": "Iestati e-pasta lietotni vai raksti uz {{email}}.",
+    "unableOpenEmailTitle": "Nevar atvērt e-pasta lietotni",
+    "unableOpenEmailBody": "Lūdzu raksti uz {{email}} un apraksti problēmu.",
+    "appVersion": "Lietotnes versija {{version}}",
+    "tapDiagnostics": "Pieskaries 7x diagnostikai",
+    "editNickname": "Mainīt segvārdu",
+    "editNicknameSubtitle": "Izvēlies, kā tavs vārds parādās līderu topā.",
+    "typeDeletePlaceholder": "Ieraksti DELETE apstiprināšanai",
+    "typeDeleteHelper": "Ieraksti tieši DELETE, lai aktivizētu konta dzēšanu.",
+    "legalLoadFailedTitle": "Neizdevās ielādēt šo lapu",
+    "openInBrowser": "Atvērt pārlūkā"
+  },
+  "squad": {
+    "chooseTeam": "Izvēlies savu komandu",
+    "loadingSquad": "Ielādē sastāvu…",
+    "changePlayers": "Mainīt spēlētājus",
+    "chooseCaptain": "Izvēlēties kapteini",
+    "budgetRemaining": "Atlikušais budžets",
+    "need": "Nepieciešams",
+    "allPositionsFilled": "Visas pozīcijas aizpildītas",
+    "transfersLeft": "Atlikušie transfēri",
+    "pickPlayer": "Izvēlies spēlētāju",
+    "searchPlayers": "Meklēt spēlētājus…",
+    "lockedTodayLabel": "Šodien bloķēts",
+    "locksWarning": "Neizdevās pārbaudīt bloķējumus — mēģini vēlreiz.",
+    "lockedToday": "Bloķēts: šim spēlētājam šodien ir spēle.",
+    "playerAlreadySelected": "Spēlētājs jau izvēlēts",
+    "chooseDifferentPlayer": "Izvēlies citu spēlētāju šai vietai.",
+    "noTransfersLeft": "Nav atlikušu transfēru",
+    "noTransfersLeftChange": "Tev nav transfēru, lai mainītu šo spēlētāju.",
+    "noTransfersLeftReplaceCaptainStill": "Bez transfēriem spēlētājus nomainīt nevar. Kapteini joprojām var mainīt.",
+    "saved": "Sastāvs saglabāts.",
+    "savedPickCaptain": "Sastāvs saglabāts. Izvēlies kapteini, lai pabeigtu.",
+    "noPlayersSelected": "Nav izvēlētu spēlētāju",
+    "addPlayersBeforeCaptain": "Pirms kapteiņa izvēles pievieno spēlētājus.",
+    "captainChange": "Kapteiņa maiņa",
+    "captainChangeInDays": "Kapteini vari mainīt pēc {{count}} dienas.",
+    "captainChangeInDays_plural": "Kapteini vari mainīt pēc {{count}} dienām.",
+    "captainChangeBlocked": "Kapteiņa maiņa bloķēta",
+    "usingTransfers": "izmantoti {{count}}"
+  },
+  "onboarding": {
+    "main": {
+      "howItWorks": "Kā tas darbojas",
+      "step1": {
+        "title": "Laipni lūdzam LV Floorball Fantasy",
+        "bullet1": "Izveido sastāvu un sacenties katru spēļu nedēļu.",
+        "bullet2": "Pelni punktus no reāliem spēlētāju sniegumiem.",
+        "bullet3": "Seko rangam, budžetam un transfēriem vienuviet."
+      },
+      "step2": {
+        "title": "Izveido sastāvu",
+        "kicker": "Budžets un lomas",
+        "text": "Sastāvs 90 kredītu ietvaros. Formācija: 4A / 2D / 1G / 1 FLEX. Kapteinis dod 2× punktus."
+      },
+      "step3": {
+        "title": "Transfēri un bloķējumi",
+        "bullet1": "Sāc ar 3 transfēriem. +1 katru mēnesi (maks. 5).",
+        "bullet2": "Spēlētāji tiek bloķēti spēļu dienās."
+      },
+      "step4": {
+        "title": "Spēļu nedēļas un punkti",
+        "text": "Spēļu nedēļas seko kalendāram (Pirmd.–Sv., Latvijas laiks).\n\nKatrs mačs šajā nedēļā veido tavus punktus.\n\nJa nedēļā nav spēļu, tās numurs var tikt izlaists."
+      }
+    },
+    "squad": {
+      "step1": {
+        "title": "Spēlētāja detaļas",
+        "body": "Pieskaries spēlētājam, lai redzētu formu un pēdējās 5 spēles."
+      },
+      "step2": {
+        "title": "Komandas punkti",
+        "body": "Pieskaries sastāvam, lai redzētu punktu sadalījumu."
+      },
+      "step3": {
+        "title": "Transfēri",
+        "body": "Izmanto transfērus, lai mainītu spēlētājus un pārvaldītu budžetu."
+      },
+      "step4": {
+        "title": "Kapteinis",
+        "body": "Izvēlies kapteini 2× punktiem (mainīt var reizi 30 dienās)."
+      },
+      "step5": {
+        "title": "Bloķējumi",
+        "body": "Spēļu dienās spēlētāji tiek bloķēti un tos nevar nomainīt."
+      }
+    }
+  },
+  "rules": {
+    "captainLabel": "Kapteinis",
+    "captainValue": "2× punkti • maiņa ik pēc 30 dienām",
+    "transfersLabel": "Transfēri",
+    "transfersValue": "3 sākumā • +1/mēnesī • max 5",
+    "gameweeksLabel": "Spēļu nedēļas",
+    "gameweeksValue": "servera noteiktas spēļu nedēļas (pēc datumiem)",
+    "locksLabel": "Bloķējumi",
+    "locksValue": "spēlētāji bloķējas spēļu dienā",
+    "playersTitle": "Spēlētāji",
+    "goalAttacker": "Vārti (uzbrucējs)",
+    "goalDefender": "Vārti (aizsargs)",
+    "assistAttacker": "Piespēle (uzbrucējs)",
+    "assistDefender": "Piespēle (aizsargs)",
+    "hatTrick": "Hat-trick (3+ vārti)",
+    "mvp": "MVP",
+    "penaltyScored": "Soda metiens realizēts",
+    "penaltyMissed": "Soda metiens nerealizēts",
+    "minorPenalty": "Mazais sods",
+    "doubleMinor": "Dubultais mazais",
+    "misconduct10": "10 min disciplīnas sods",
+    "redCard": "Sarkanā kartīte",
+    "goaliesTitle": "Vārtsargi",
+    "goalieAssist": "Piespēle",
+    "save": "Atvairījums",
+    "goalsAgainst0": "Ielaisti vārti: 0",
+    "goalsAgainst12": "Ielaisti vārti: 1-2",
+    "goalsAgainst35": "Ielaisti vārti: 3-5",
+    "goalsAgainst69": "Ielaisti vārti: 6-9",
+    "goalsAgainst10p": "Ielaisti vārti: 10+",
+    "winBonus": "Uzvaras bonuss"
+  },
+  "errors": {
+    "saveFailed": "Saglabāšana neizdevās",
+    "failedToSaveSquad": "Neizdevās saglabāt sastāvu.",
+    "failedToLoadFixtures": "Neizdevās ielādēt spēles",
+    "pleaseLogIn": "Lūdzu pieslēdzies",
+    "noFantasyTeamFound": "Fantāzijas komanda nav atrasta",
+    "unexpectedErrorLoadingPoints": "Nezināma kļūda ielādējot punktus."
+  }
+}

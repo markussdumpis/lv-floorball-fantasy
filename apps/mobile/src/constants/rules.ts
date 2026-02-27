@@ -1,6 +1,10 @@
-export const GAME_RULES = [
-  { label: 'Captain', value: '2× points • change every 30 days' },
-  { label: 'Transfers', value: '3 start • +1/month • max 5' },
-  { label: 'Gameweeks', value: 'server-defined matchweeks (grouped by dates)' },
-  { label: 'Locks', value: 'players lock on match day' },
-];
+type Translate = (key: string) => string;
+
+export function getGameRules(t: Translate) {
+  return [
+    { label: t('rules.captainLabel'), value: t('rules.captainValue') },
+    { label: t('rules.transfersLabel'), value: t('rules.transfersValue') },
+    { label: t('rules.gameweeksLabel'), value: t('rules.gameweeksValue') },
+    { label: t('rules.locksLabel'), value: t('rules.locksValue') },
+  ];
+}

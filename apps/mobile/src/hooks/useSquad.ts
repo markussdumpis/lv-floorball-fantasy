@@ -73,6 +73,18 @@ const areSlotsEqual = (a: SquadSlot[], b: SquadSlot[]) => {
 };
 
 export function useSquad() {
+  const toPriceNumber = (value: unknown): number | null => {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  };
+  const toBudgetStep = (value: number): number => Number(value.toFixed(1));
+
   const [teamId, setTeamId] = useState<string | null>(null);
   const [state, setState] = useState<SquadState>({
     slots: SLOT_KEYS.map(slot_key => ({ slot_key, player_id: null })),
@@ -335,7 +347,7 @@ export function useSquad() {
       if (__DEV__) {
         const ids = (playerRows ?? []).map(row => row.player_id).filter(Boolean);
         const lockedCost = (playerRows ?? []).reduce((sum, row) => {
-          const price = typeof row.purchase_price === 'number' && !Number.isNaN(row.purchase_price) ? row.purchase_price : 0;
+          const price = toPriceNumber(row.purchase_price) ?? 0;
           return sum + price;
         }, 0);
         console.log('[squad-debug] loadSquad roster', {
@@ -353,7 +365,7 @@ export function useSquad() {
         detail: row.players
           ? {
               ...row.players,
-              purchase_price: typeof row.purchase_price === 'number' ? row.purchase_price : null,
+              purchase_price: toPriceNumber(row.purchase_price),
               joined_at: row.joined_at ?? null,
               left_at: row.left_at ?? null,
             }
@@ -517,11 +529,15 @@ export function useSquad() {
         let roster = rosterRows ?? [];
         const resolveCurrentPrice = (id: string): number => {
           const live = playerMap.get(id);
-          if (typeof live?.price_final === 'number' && !Number.isNaN(live.price_final)) return live.price_final;
-          if (typeof live?.price === 'number' && !Number.isNaN(live.price)) return live.price;
+          const liveFinal = toPriceNumber(live?.price_final);
+          if (liveFinal !== null) return toBudgetStep(liveFinal);
+          const livePrice = toPriceNumber(live?.price);
+          if (livePrice !== null) return toBudgetStep(livePrice);
           const detail = stateRef.current.playerDetails[id];
-          if (typeof detail?.price_final === 'number' && !Number.isNaN(detail.price_final)) return detail.price_final;
-          if (typeof detail?.price === 'number' && !Number.isNaN(detail.price)) return detail.price;
+          const detailFinal = toPriceNumber(detail?.price_final);
+          if (detailFinal !== null) return toBudgetStep(detailFinal);
+          const detailPrice = toPriceNumber(detail?.price);
+          if (detailPrice !== null) return toBudgetStep(detailPrice);
           return 0;
         };
 
@@ -669,23 +685,27 @@ export function useSquad() {
       const newIds = state.slots.map(s => s.player_id).filter(Boolean) as string[];
       const resolveCurrentPrice = (playerId: string): number => {
         const live = playerMap.get(playerId);
-        if (typeof live?.price_final === 'number' && !Number.isNaN(live.price_final)) return live.price_final;
-        if (typeof live?.price === 'number' && !Number.isNaN(live.price)) return live.price;
+        const liveFinal = toPriceNumber(live?.price_final);
+        if (liveFinal !== null) return toBudgetStep(liveFinal);
+        const livePrice = toPriceNumber(live?.price);
+        if (livePrice !== null) return toBudgetStep(livePrice);
         const detail = state.playerDetails[playerId];
-        if (typeof detail?.price_final === 'number' && !Number.isNaN(detail.price_final)) return detail.price_final;
-        if (typeof detail?.price === 'number' && !Number.isNaN(detail.price)) return detail.price;
+        const detailFinal = toPriceNumber(detail?.price_final);
+        if (detailFinal !== null) return toBudgetStep(detailFinal);
+        const detailPrice = toPriceNumber(detail?.price);
+        if (detailPrice !== null) return toBudgetStep(detailPrice);
         return 0;
       };
       const desiredCaptainId: string | null =
         state.captainId && newIds.includes(state.captainId) ? state.captainId : null;
 
       // Fetch current active rows
-      const { data: activeRows } = await fetchJson<{ player_id: string; is_captain: boolean }[]>(
+      const { data: activeRows } = await fetchJson<{ player_id: string; is_captain: boolean; purchase_price?: number | string | null }[]>(
         '/rest/v1/fantasy_team_players',
         {
           requireAuth: true,
           query: {
-            select: 'player_id,is_captain',
+            select: 'player_id,is_captain,purchase_price',
             fantasy_team_id: `eq.${team}`,
             left_at: 'is.null',
           },
@@ -696,6 +716,21 @@ export function useSquad() {
       const currentCaptainId = (activeRows ?? []).find(r => r.is_captain)?.player_id ?? null;
       const toClose = activeIds.filter(id => !newIds.includes(id));
       const toInsert = newIds.filter(id => !activeIds.includes(id));
+      const activeLockedPriceById = new Map(
+        (activeRows ?? []).map(row => [row.player_id, toPriceNumber(row.purchase_price) ?? 0] as const)
+      );
+      const projectedCost = newIds.reduce((sum, id) => {
+        if (activeLockedPriceById.has(id)) {
+          return sum + (activeLockedPriceById.get(id) ?? 0);
+        }
+        return sum + resolveCurrentPrice(id);
+      }, 0);
+      const projectedRounded = toBudgetStep(projectedCost);
+      if (projectedRounded > SEASON_BUDGET_CREDITS) {
+        return fail(
+          `Over budget by ${(projectedRounded - SEASON_BUDGET_CREDITS).toFixed(1)}k. Keep squad within ${SEASON_BUDGET_CREDITS.toFixed(1)}k.`
+        );
+      }
       const didChange =
         transfersUsed > 0 ||
         toClose.length > 0 ||
@@ -770,6 +805,9 @@ export function useSquad() {
           diagLog('squad_save_roster_insert_ok', { inserted: rosterPayload.length, team });
         } catch (e: any) {
           diagLog('squad_save_roster_insert_fail', { message: e?.message });
+          if ((e?.message ?? '').includes('BUDGET_EXCEEDED')) {
+            return fail(`Over budget. Keep squad within ${SEASON_BUDGET_CREDITS.toFixed(1)}k.`);
+          }
           return fail(e?.message ?? 'Failed to save roster players');
         }
       }
@@ -835,16 +873,14 @@ export function useSquad() {
     const priceFor = (playerId: string | null) => {
       if (!playerId) return 0;
       const detail = state.playerDetails[playerId];
-      if (typeof detail?.purchase_price === 'number' && !Number.isNaN(detail.purchase_price)) {
-        return detail.purchase_price;
+      const lockedPrice = toPriceNumber(detail?.purchase_price);
+      if (lockedPrice !== null) {
+        return lockedPrice;
       }
       const player = playerMap.get(playerId) ?? detail;
-      const price =
-        typeof player?.price_final === 'number' && !Number.isNaN(player.price_final)
-          ? player.price_final
-          : typeof player?.price === 'number' && !Number.isNaN(player.price)
-          ? player.price
-          : 0;
+      const liveFinal = toPriceNumber(player?.price_final);
+      const livePrice = toPriceNumber(player?.price);
+      const price = liveFinal ?? livePrice ?? 0;
       return price;
     };
 

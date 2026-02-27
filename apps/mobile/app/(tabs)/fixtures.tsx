@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 import { AppBackground } from '../../src/components/AppBackground';
 import { fetchJson } from '../../src/lib/supabaseRest';
 import { COLORS } from '../../src/theme/colors';
+import { useTranslation } from 'react-i18next';
 
 type TeamRef = {
   id?: string;
@@ -23,6 +24,7 @@ type Fixture = {
 };
 
 export default function FixturesScreen() {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<Fixture[]>([]);
@@ -32,23 +34,25 @@ export default function FixturesScreen() {
     setLoading(true);
     setError(null);
     try {
+      const nowIso = new Date().toISOString();
       const select =
         'id,date,status,matchweek_number,home:teams!matches_home_team_fkey(id,code,name,logo_url),away:teams!matches_away_team_fkey(id,code,name,logo_url)';
       const { data } = await fetchJson<Fixture[]>('/rest/v1/matches_with_matchweek', {
         query: {
           select,
           status: 'eq.scheduled',
+          date: `gte.${nowIso}`,
           order: 'date.asc',
         },
         timeoutMs: 12000,
       });
       setRows(Array.isArray(data) ? data : []);
     } catch (err: any) {
-      setError(err?.message ?? 'Failed to load fixtures');
+      setError(err?.message ?? t('errors.failedToLoadFixtures'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     load();
@@ -84,7 +88,8 @@ const renderRow = (fixture: Fixture) => {
       <View style={styles.matchRow}>
         <View style={{ flex: 1 }}>
           <Text style={styles.matchTeams} numberOfLines={1} ellipsizeMode="tail">
-            {formatTeamName(fixture.home?.code ?? fixture.home?.name ?? 'Home')} vs {formatTeamName(fixture.away?.code ?? fixture.away?.name ?? 'Away')}
+            {formatTeamName(fixture.home?.code ?? fixture.home?.name ?? t('fixtures.home'))} vs{' '}
+            {formatTeamName(fixture.away?.code ?? fixture.away?.name ?? t('fixtures.away'))}
           </Text>
           <Text style={styles.matchDate}>{dateText}</Text>
         </View>
@@ -96,23 +101,23 @@ const renderRow = (fixture: Fixture) => {
   return (
     <AppBackground variant="home">
       <View style={[styles.screen, { paddingTop: Math.max(insets.top + 8, 24) }]}>
-        <Text style={styles.title}>Fixtures</Text>
+        <Text style={styles.title}>{t('fixtures.title')}</Text>
 
         {loading ? (
           <View style={styles.center}>
             <ActivityIndicator />
-            <Text style={styles.muted}>Loading fixtures…</Text>
+            <Text style={styles.muted}>{t('fixtures.loading')}</Text>
           </View>
         ) : error ? (
           <View style={styles.center}>
             <Text style={styles.error}>{error}</Text>
             <Pressable style={styles.retry} onPress={load}>
-              <Text style={styles.retryText}>Retry</Text>
+              <Text style={styles.retryText}>{t('common.retry')}</Text>
             </Pressable>
           </View>
         ) : rows.length === 0 ? (
           <View style={styles.center}>
-            <Text style={styles.muted}>No upcoming matches</Text>
+            <Text style={styles.muted}>{t('fixtures.noUpcoming')}</Text>
           </View>
         ) : (
           <FlatList
@@ -120,7 +125,7 @@ const renderRow = (fixture: Fixture) => {
             keyExtractor={item => `gw-${item.gw}`}
             renderItem={({ item }) => (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>GW {item.gw}</Text>
+                <Text style={styles.sectionTitle}>{t('fixtures.gw', { number: item.gw })}</Text>
                 {item.list.map(f => (
                   <View key={f.id} style={styles.sectionRow}>
                     {renderRow(f)}

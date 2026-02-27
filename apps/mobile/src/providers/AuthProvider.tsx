@@ -9,6 +9,7 @@ import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
 import { diagLog } from '../lib/diagnostics';
 import { forceLocalSignOut } from '../lib/supabaseRest';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppLanguage, getCurrentAppLanguage, syncLanguageFromProfile } from '../i18n';
 
 WebBrowser.maybeCompleteAuthSession();
 Notifications.setNotificationHandler({
@@ -27,7 +28,12 @@ type AuthContextValue = {
   loading: boolean;
   configError: string | null;
   signInWithEmail: (email: string, password: string) => Promise<Session | null>;
-  signUpWithEmail: (email: string, password: string, nickname?: string) => Promise<Session | null>;
+  signUpWithEmail: (
+    email: string,
+    password: string,
+    nickname?: string,
+    language?: AppLanguage,
+  ) => Promise<Session | null>;
   signInWithGoogle: () => Promise<Session | null>;
   setNickname: (nickname: string) => Promise<string>;
   setNicknameForUser: (userId: string, nickname: string) => Promise<string>;
@@ -96,10 +102,11 @@ export function AuthProvider({ children }: Props) {
       try {
         const projectId =
           Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
-        const token = projectId
-          ? await Notifications.getExpoPushTokenAsync({ projectId })
-          : await Notifications.getExpoPushTokenAsync();
-        console.log(`[push] token=${token.data}`);
+        if (projectId) {
+          await Notifications.getExpoPushTokenAsync({ projectId });
+        } else {
+          await Notifications.getExpoPushTokenAsync();
+        }
       } catch (error) {
         console.log('[push] push token unavailable on simulator');
       }
@@ -225,6 +232,7 @@ export function AuthProvider({ children }: Props) {
         setUser(initialSession?.user ?? null);
         if (initialSession?.user) {
           await ensureProfile(initialSession.user.id, supabase);
+          await syncLanguageFromProfile(initialSession.user.id);
           const preferredFromMeta = normalizePreferredNickname(initialSession.user.user_metadata?.nickname);
           await ensureNicknamePresent(initialSession.user.id, supabase, preferredFromMeta);
           const createdAt = initialSession.user.created_at ?? null;
@@ -246,6 +254,7 @@ export function AuthProvider({ children }: Props) {
       setUser(newSession?.user ?? null);
       if (newSession?.user) {
         await ensureProfile(newSession.user.id, supabase);
+        await syncLanguageFromProfile(newSession.user.id);
         const preferredFromMeta = normalizePreferredNickname(newSession.user.user_metadata?.nickname);
         await ensureNicknamePresent(newSession.user.id, supabase, preferredFromMeta);
         const createdAt = newSession.user.created_at ?? null;
@@ -272,18 +281,35 @@ export function AuthProvider({ children }: Props) {
     return data.session ?? null;
   };
 
-  const signUpWithEmail = async (email: string, password: string, nickname?: string) => {
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+    nickname?: string,
+    language?: AppLanguage,
+  ) => {
     if (!supabase) throw new Error(configError ?? 'Supabase not configured.');
     const preferred = normalizePreferredNickname(nickname);
+    const selectedLanguage = language ?? getCurrentAppLanguage();
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: preferred ? { data: { nickname: preferred } } : undefined,
+      options: {
+        data: {
+          ...(preferred ? { nickname: preferred } : {}),
+          language: selectedLanguage,
+        },
+      },
     });
     if (error) throw error;
     const userId = data.session?.user?.id ?? data.user?.id ?? null;
     if (userId) {
       await ensureProfile(userId, supabase);
+      const { error: languageErr } = await supabase
+        .from('profiles')
+        .upsert({ id: userId, language: selectedLanguage }, { onConflict: 'id' });
+      if (languageErr) {
+        console.warn('Failed to persist signup language', languageErr);
+      }
       if (preferred) {
         try {
           await persistNicknameForUser(userId, preferred, supabase);
@@ -393,7 +419,8 @@ export function AuthProvider({ children }: Props) {
 
     const redactedUrl = redactTokens(resultUrl);
     const urlObj = new URL(resultUrl);
-    const hasCode = !!urlObj.searchParams.get('code');
+    const authCode = urlObj.searchParams.get('code');
+    const hasCode = !!authCode;
     const hasError = !!(urlObj.searchParams.get('error') || urlObj.searchParams.get('error_description'));
     diagLog('oauth_callback_received', { url: redactedUrl, hasCode, hasError });
     if (__DEV__) console.log('[oauth] callback parsed', { url: redactedUrl, hasCode, hasError });
@@ -421,8 +448,16 @@ export function AuthProvider({ children }: Props) {
     }
 
     diagLog('oauth_pkce_exchange', { hasCode, hasError });
-    const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(resultUrl);
-    if (exchangeError) throw exchangeError;
+    const { data: exchangeData, error: exchangeError } = await supabase.auth.exchangeCodeForSession(
+      authCode!,
+    );
+    if (exchangeError) {
+      const raw = String(exchangeError.message ?? '').toLowerCase();
+      if (raw.includes('invalid flow state') || raw.includes('no valid flow state')) {
+        throw new Error('Google sign-in expired. Please try again.');
+      }
+      throw exchangeError;
+    }
 
     if (exchangeData.session?.user) {
       await ensureProfile(exchangeData.session.user.id, supabase);

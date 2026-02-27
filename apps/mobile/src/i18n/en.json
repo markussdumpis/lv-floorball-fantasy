@@ -1,0 +1,300 @@
+{
+  "app": {
+    "loadingAccount": "Loading account…"
+  },
+  "common": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "close": "Close",
+    "done": "Done",
+    "next": "Next",
+    "start": "Start",
+    "save": "Save",
+    "saved": "Saved",
+    "skip": "Skip",
+    "stay": "Stay",
+    "discard": "Discard",
+    "retry": "Retry",
+    "show": "Show",
+    "hide": "Hide",
+    "notice": "Notice",
+    "locked": "Locked",
+    "points": "Points",
+    "vs": "vs",
+    "unknown": "Unknown",
+    "unknownPlayer": "Unknown player",
+    "stepOf": "Step {{current}} of {{total}}",
+    "tipOf": "Tip {{current}} of {{total}}",
+    "unsavedChanges": "Unsaved changes",
+    "unsavedChangesBody": "You have unsaved squad changes. Save before leaving?"
+  },
+  "nav": {
+    "home": "Home",
+    "squad": "Squad",
+    "profile": "Profile",
+    "fixtures": "Fixtures",
+    "myPoints": "My Points"
+  },
+  "language": {
+    "english": "English",
+    "latvian": "Latviešu",
+    "selectLanguage": "Select language"
+  },
+  "auth": {
+    "welcomeBack": "Welcome back",
+    "createAccount": "Create account",
+    "joinTeam": "Join to build your fantasy team.",
+    "signInManage": "Sign in to manage your squad.",
+    "email": "Email",
+    "password": "Password",
+    "nickname": "Nickname",
+    "nicknamePlaceholder": "Nickname (3-20 chars)",
+    "continueGoogle": "Continue with Google",
+    "signIn": "Sign In",
+    "createAccountCta": "Create Account",
+    "dontHaveAccount": "Don't have an account? Sign up",
+    "alreadyHaveAccount": "Already have an account? Sign in",
+    "language": "Language",
+    "errors": {
+      "emailRequired": "Email is required.",
+      "passwordRequired": "Password is required.",
+      "emailInvalid": "Please enter a valid email.",
+      "nicknameRequired": "Nickname is required.",
+      "nicknameLength": "Nickname must be 3-20 characters.",
+      "authFailed": "Authentication failed.",
+      "googleFailed": "Google sign-in failed.",
+      "googleIncomplete": "We could not complete Google sign-in. Please try again.",
+      "nicknameSaveFailed": "Failed to save nickname.",
+      "nicknameRequiredSignup": "Nickname is required to finish sign-up."
+    },
+    "messages": {
+      "accountCreated": "Account created. If email confirmation is required, check your inbox."
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "changeNickname": "Change Nickname",
+    "manageAccount": "Manage account",
+    "howItWorks": "How it works",
+    "privacyPolicy": "Privacy Policy",
+    "termsOfService": "Terms of Service",
+    "support": "Support",
+    "signOut": "Sign out",
+    "deleteAccount": "Delete account",
+    "language": "Language"
+  },
+  "home": {
+    "myTeam": "My Team",
+    "draftMode": "Draft mode",
+    "comingSoon": "Coming soon",
+    "upcomingMatches": "Upcoming matches",
+    "seeAll": "See all",
+    "noUpcomingMatches": "No upcoming matches",
+    "leaderboard": "Leaderboard",
+    "loadingLeaderboard": "Loading leaderboard…",
+    "noLeaderboard": "No leaderboard yet — be the first",
+    "rulesPoints": "Rules & Points",
+    "rules": "Rules",
+    "pointsShort": "{{count}} pts"
+  },
+  "fixtures": {
+    "title": "Fixtures",
+    "loading": "Loading fixtures…",
+    "noUpcoming": "No upcoming matches",
+    "home": "Home",
+    "away": "Away",
+    "gw": "GW {{number}}"
+  },
+  "myPoints": {
+    "loading": "Loading your points…",
+    "position": "Position",
+    "captainBonus": "Captain bonus",
+    "seasonTotal": "Season Total: {{total}}",
+    "seasonLabel": "Season: {{season}}",
+    "empty": "No players to show. Save a squad to see points."
+  },
+  "accountSecurity": {
+    "title": "Account Security",
+    "missingEmailTitle": "Missing email",
+    "missingEmailBody": "No email found for this account.",
+    "resetEmailSent": "Password reset email sent",
+    "resetFailedTitle": "Reset failed",
+    "resetTimeout": "Request timed out. Please try again.",
+    "resetFailedBody": "Could not send password reset email.",
+    "copied": "Copied",
+    "authProvider": "Auth provider",
+    "copy": "Copy",
+    "supportId": "Support ID",
+    "resetHint": "We’ll email you a reset link.",
+    "sendReset": "Send password reset email",
+    "googleManaged": "You’re signed in with Google. Password changes are managed in your Google account.",
+    "providerManaged": "You’re signed in with {{provider}}. Password changes are managed in your {{provider}} account."
+  },
+  "setPassword": {
+    "title": "Set New Password",
+    "subtitle": "Choose a new password for your account.",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "atLeastChars": "At least {{min}} characters",
+    "repeatPassword": "Repeat password",
+    "updatePassword": "Update password",
+    "invalidPasswordTitle": "Invalid password",
+    "invalidPasswordBody": "Password must be at least {{min}} characters.",
+    "passwordMismatchTitle": "Passwords do not match",
+    "passwordMismatchBody": "Please enter the same password in both fields.",
+    "updatedTitle": "Password updated",
+    "updatedBody": "Please sign in with your new password.",
+    "updateFailedTitle": "Update failed",
+    "updateFailedBody": "Could not update password."
+  },
+  "profile": {
+    "performanceSnapshot": "Performance snapshot",
+    "totalPoints": "Total points",
+    "currentSeason": "Current season",
+    "seasonBadge": "Season {{season}}",
+    "place": "Place",
+    "unranked": "Unranked",
+    "leagueRanking": "League ranking",
+    "gameweeksPlayed": "Gameweeks played",
+    "distinctSubmittedWeeks": "Distinct submitted weeks",
+    "bestRank": "Best rank",
+    "lowestRankAchieved": "Lowest rank achieved",
+    "nicknameAvailableInDays": "Available in {{count}} day",
+    "nicknameAvailableInDays_plural": "Available in {{count}} days",
+    "signOutConfirm": "Are you sure you want to sign out?",
+    "deleteFailedTitle": "Delete account failed",
+    "sessionExpiredSignInAgain": "Your session expired. Please sign in again.",
+    "sessionCheckTimeout": "Session check timed out. Please try again.",
+    "unableDeleteNow": "Unable to delete account right now.",
+    "unableOpenBrowserTitle": "Unable to open browser",
+    "tryAgainLater": "Please try again later.",
+    "noEmailAppTitle": "No email app available",
+    "noEmailAppBody": "Please set up an email app on this device, or email us at {{email}}.",
+    "unableOpenEmailTitle": "Unable to open email app",
+    "unableOpenEmailBody": "Please email us at {{email}} and include details about your issue.",
+    "appVersion": "App version {{version}}",
+    "tapDiagnostics": "Tap 7x for diagnostics",
+    "editNickname": "Edit nickname",
+    "editNicknameSubtitle": "Choose how your name appears in leaderboards.",
+    "typeDeletePlaceholder": "Type DELETE to confirm",
+    "typeDeleteHelper": "Type DELETE exactly to enable account deletion.",
+    "legalLoadFailedTitle": "Could not load this page",
+    "openInBrowser": "Open in browser"
+  },
+  "squad": {
+    "chooseTeam": "Choose your team",
+    "loadingSquad": "Loading squad…",
+    "changePlayers": "Change players",
+    "chooseCaptain": "Choose captain",
+    "budgetRemaining": "Budget remaining",
+    "need": "Need",
+    "allPositionsFilled": "All positions filled",
+    "transfersLeft": "Transfers left",
+    "pickPlayer": "Pick player",
+    "searchPlayers": "Search players…",
+    "lockedTodayLabel": "Locked today",
+    "locksWarning": "Couldn't verify locks—try again.",
+    "lockedToday": "Locked: this player has a match today.",
+    "playerAlreadySelected": "Player already selected",
+    "chooseDifferentPlayer": "Choose a different player for this slot.",
+    "noTransfersLeft": "No transfers left",
+    "noTransfersLeftChange": "You have no transfers left to change this player.",
+    "noTransfersLeftReplaceCaptainStill": "You cannot replace players without transfers. Captain can still be updated.",
+    "saved": "Squad saved.",
+    "savedPickCaptain": "Squad saved. Pick a captain to finalize.",
+    "noPlayersSelected": "No players selected",
+    "addPlayersBeforeCaptain": "Add players before choosing a captain.",
+    "captainChange": "Captain change",
+    "captainChangeInDays": "You can change your captain in {{count}} day.",
+    "captainChangeInDays_plural": "You can change your captain in {{count}} days.",
+    "captainChangeBlocked": "Captain change blocked",
+    "usingTransfers": "using {{count}}"
+  },
+  "onboarding": {
+    "main": {
+      "howItWorks": "How it works",
+      "step1": {
+        "title": "Welcome to LV Floorball Fantasy",
+        "bullet1": "Build your squad and compete every matchweek.",
+        "bullet2": "Earn points from real player performances.",
+        "bullet3": "Track rank, budget, and transfers in one place."
+      },
+      "step2": {
+        "title": "Build your squad",
+        "kicker": "Budget & roles",
+        "text": "Build within 90 credits. Roster: 4A / 2D / 1G / 1 FLEX. Captain gives 2× points."
+      },
+      "step3": {
+        "title": "Transfers & locks",
+        "bullet1": "Start with 3 transfers. +1 each month (max 5).",
+        "bullet2": "Players lock on match days."
+      },
+      "step4": {
+        "title": "Gameweeks & points",
+        "text": "Gameweeks follow the real calendar (Mon–Sun, Latvia time).\n\nEvery match played within that week contributes to your total points.\n\nIf a week has no fixtures, its number may simply be skipped."
+      }
+    },
+    "squad": {
+      "step1": {
+        "title": "Player details",
+        "body": "Tap a player to see form and last 5 matches."
+      },
+      "step2": {
+        "title": "Team points",
+        "body": "Tap the squad to view your points breakdown."
+      },
+      "step3": {
+        "title": "Transfers",
+        "body": "Use transfers to swap players and manage budget."
+      },
+      "step4": {
+        "title": "Captain",
+        "body": "Pick a captain for 2× points (change once every 30 days)."
+      },
+      "step5": {
+        "title": "Locks",
+        "body": "Players lock on match days and can’t be transferred."
+      }
+    }
+  },
+  "rules": {
+    "captainLabel": "Captain",
+    "captainValue": "2× points • change every 30 days",
+    "transfersLabel": "Transfers",
+    "transfersValue": "3 start • +1/month • max 5",
+    "gameweeksLabel": "Gameweeks",
+    "gameweeksValue": "server-defined matchweeks (grouped by dates)",
+    "locksLabel": "Locks",
+    "locksValue": "players lock on match day",
+    "playersTitle": "Players",
+    "goalAttacker": "Goal (Attacker)",
+    "goalDefender": "Goal (Defender)",
+    "assistAttacker": "Assist (Attacker)",
+    "assistDefender": "Assist (Defender)",
+    "hatTrick": "Hat-trick (3+ goals)",
+    "mvp": "MVP",
+    "penaltyScored": "Penalty shot scored",
+    "penaltyMissed": "Penalty shot missed",
+    "minorPenalty": "Minor penalty",
+    "doubleMinor": "Double minor",
+    "misconduct10": "Misconduct 10",
+    "redCard": "Red card",
+    "goaliesTitle": "Goalies",
+    "goalieAssist": "Assist",
+    "save": "Save",
+    "goalsAgainst0": "Goals against: 0",
+    "goalsAgainst12": "Goals against: 1-2",
+    "goalsAgainst35": "Goals against: 3-5",
+    "goalsAgainst69": "Goals against: 6-9",
+    "goalsAgainst10p": "Goals against: 10+",
+    "winBonus": "Win bonus"
+  },
+  "errors": {
+    "saveFailed": "Save failed",
+    "failedToSaveSquad": "Failed to save squad.",
+    "failedToLoadFixtures": "Failed to load fixtures",
+    "pleaseLogIn": "Please log in",
+    "noFantasyTeamFound": "No fantasy team found",
+    "unexpectedErrorLoadingPoints": "Unexpected error loading points."
+  }
+}

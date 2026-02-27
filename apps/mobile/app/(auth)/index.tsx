@@ -4,11 +4,13 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router';
 import { COLORS } from '../../src/theme/colors';
 import { AppBackground } from '../../src/components/AppBackground';
+import { useTranslation } from 'react-i18next';
 
 // Use brand logo; replace if you prefer another mark
 const LOGO = require('../../assets/brand/logo-wordmark.png');
 
 export default function AuthLanding() {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
@@ -24,14 +26,14 @@ export default function AuthLanding() {
             android_ripple={{ color: 'rgba(255,255,255,0.12)' }}
             onPress={() => router.push('/(auth)/login')}
           >
-            <Text style={styles.ctaGhostText}>Sign In</Text>
+            <Text style={styles.ctaGhostText}>{t('auth.signIn')}</Text>
           </Pressable>
           <Pressable
             style={[styles.cta, styles.ctaPrimary]}
             android_ripple={{ color: 'rgba(0,0,0,0.08)' }}
             onPress={() => router.push('/(auth)/signup')}
           >
-            <Text style={styles.ctaPrimaryText}>Sign Up</Text>
+            <Text style={styles.ctaPrimaryText}>{t('auth.createAccount')}</Text>
           </Pressable>
         </View>
       </SafeAreaView>

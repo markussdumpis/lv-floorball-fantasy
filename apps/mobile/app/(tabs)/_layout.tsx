@@ -4,8 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { Alert } from 'react-native';
 import { COLORS } from '../../src/theme/colors';
 import { getSquadUnsavedGuard } from '../../src/lib/squadUnsavedGuard';
+import { useTranslation } from 'react-i18next';
 
 export default function TabsLayout() {
+  const { t, i18n } = useTranslation();
   const tabPromptOpenRef = useRef(false);
 
   const handleProtectedTabPress = useCallback((event: any, navigation: any, targetRouteName: string) => {
@@ -20,16 +22,16 @@ export default function TabsLayout() {
     if (tabPromptOpenRef.current) return;
     tabPromptOpenRef.current = true;
 
-    Alert.alert('Unsaved changes', 'You have unsaved squad changes. Save before leaving?', [
+    Alert.alert(t('common.unsavedChanges'), t('common.unsavedChangesBody'), [
       {
-        text: 'Stay',
+        text: t('common.stay'),
         style: 'cancel',
         onPress: () => {
           tabPromptOpenRef.current = false;
         },
       },
       {
-        text: 'Discard',
+        text: t('common.discard'),
         style: 'destructive',
         onPress: () => {
           tabPromptOpenRef.current = false;
@@ -40,13 +42,13 @@ export default function TabsLayout() {
         },
       },
       {
-        text: 'Save',
+        text: t('common.save'),
         onPress: () => {
           tabPromptOpenRef.current = false;
           void (async () => {
             const result = await guard.save();
             if (!result?.ok) {
-              Alert.alert('Save failed', result?.error ?? 'Failed to save squad.');
+              Alert.alert(t('errors.saveFailed'), result?.error ?? t('errors.failedToSaveSquad'));
               return;
             }
             navigation.navigate(targetRouteName);
@@ -54,10 +56,11 @@ export default function TabsLayout() {
         },
       },
     ]);
-  }, []);
+  }, [t]);
 
   return (
     <Tabs
+      key={`tabs-${i18n.language}`}
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
@@ -89,7 +92,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: t('nav.home'),
         }}
         listeners={({ navigation, route }) => ({
           tabPress: event => {
@@ -100,13 +103,13 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="squad"
         options={{
-          title: 'Squad',
+          title: t('nav.squad'),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
+          title: t('nav.profile'),
         }}
         listeners={({ navigation, route }) => ({
           tabPress: event => {
@@ -135,14 +138,14 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="my-points"
         options={{
-          title: 'My Points',
+          title: t('nav.myPoints'),
           href: null,
         }}
       />
       <Tabs.Screen
         name="fixtures"
         options={{
-          title: 'Fixtures',
+          title: t('nav.fixtures'),
           href: null,
         }}
       />
